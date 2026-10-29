@@ -2,9 +2,25 @@ import os
 import joblib
 import sqlite3
 from datetime import datetime
+from pydantic import BaseModel, Field
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+
+app = FastAPI(
+    title="MistSan Ingestion & Compliance Engine",
+    description="Real-time ML-evaluated dry-fog sanitization audit microservice (PD 856 / RA 10611 compliant)",
+    version="1.0.0"
+)
+
+# Pahintulutan ang browser CORS para sa dashboard
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app = FastAPI(
     title="MistSan Telemetry & Compliance Ingestion Engine",
