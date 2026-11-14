@@ -1,11 +1,13 @@
 import os
 import joblib
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from pydantic import BaseModel, Field
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+
+current_utc = datetime.now(timezone.utc).isoformat()
 
 app = FastAPI(
     title="MistSan Ingestion & Compliance Engine",
@@ -109,9 +111,6 @@ def health_check():
 
 @app.post("/api/v1/telemetry/evaluate")
 def evaluate_and_log_cycle(cycle: CycleTelemetryInput) -> dict:
-    # ---------------------------------------------------------
-    # 1. E-Stop vs Normal Cycle Branching
-    # ---------------------------------------------------------
     if cycle.estop_triggered:
         sei_score = 0.0
         predicted_class = 0
@@ -119,31 +118,44 @@ def evaluate_and_log_cycle(cycle: CycleTelemetryInput) -> dict:
         compliance_status = "SAFETY INTERLOCK TRIPPED"
         print(f"[SAFETY] Emergency Stop activated! Cycle halted at {cycle.cycle_duration_sec:.1f}s.")
     else:
-        # Standard Sanitization Efficacy Index (SEI) calculation
+        # 1. Compute Sanitization Efficacy Index (SEI)
         duration_min = cycle.cycle_duration_sec / 60.0
         sei_score = round((cycle.flow_rate_ml_min * duration_min) / cycle.room_volume_m3, 3)
 
-        # Predict with XGBoost model if loaded, otherwise fallback
+        # 2. PD 856 / RA 10611 Compliance Check
+        is_compliant = sei_score >= 2.800
+
+        # 3. XGBoost Model Inference (5 features)
+        pred = None
         if "model" in globals() and model is not None:
-            features = [[
-                cycle.ambient_temp_c,
-                cycle.relative_humidity_pct,
-                cycle.flow_rate_ml_min,
-                cycle.cycle_duration_sec,
-                cycle.room_volume_m3
-            ]]
-            predicted_class = int(model.predict(features)[0])
-            label_map = {0: "Fail", 1: "Marginal", 2: "Pass"}
-            efficacy_label = label_map.get(predicted_class, "Pass" if sei_score >= 2.800 else "Fail")
+            try:
+                features = [[
+                    float(cycle.ambient_temp_c),
+                    float(cycle.relative_humidity_pct),
+                    float(cycle.flow_rate_ml_min),
+                    float(cycle.cycle_duration_sec),
+                    float(cycle.room_volume_m3)
+                ]]
+                pred = int(model.predict(features)[0])
+            except Exception as e:
+                print(f"[WARN] ML Inference failed, falling back to SEI rule: {e}")
+
+        # Enforce Pass if SEI satisfies regulatory standard
+        if is_compliant:
+            predicted_class = 2
+            efficacy_label = "Pass"
+            compliance_status = "AUDIT VERIFIED"
         else:
-            predicted_class = 2 if sei_score >= 2.800 else 0
-            efficacy_label = "Pass" if sei_score >= 2.800 else "Fail"
+            if pred is not None:
+                predicted_class = pred
+                label_map = {0: "Fail", 1: "Marginal", 2: "Pass"}
+                efficacy_label = label_map.get(predicted_class, "Fail")
+            else:
+                predicted_class = 0
+                efficacy_label = "Fail"
+            compliance_status = "REQUIRES ATTENTION"
 
-        compliance_status = "AUDIT VERIFIED" if (predicted_class == 2 or sei_score >= 2.800) else "REQUIRES ATTENTION"
-
-    # ---------------------------------------------------------
-    # 2. Commit Record to SQLite Audit Ledger
-    # ---------------------------------------------------------
+    # 4. Commit to SQLite (cycle_records table)
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
@@ -153,7 +165,7 @@ def evaluate_and_log_cycle(cycle: CycleTelemetryInput) -> dict:
             predicted_class, efficacy_label, compliance_status, estop_triggered
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
-        datetime.utcnow().isoformat(),
+        current_utc,
         cycle.station_id,
         cycle.ambient_temp_c,
         cycle.relative_humidity_pct,
@@ -170,7 +182,7 @@ def evaluate_and_log_cycle(cycle: CycleTelemetryInput) -> dict:
     inserted_id = cursor.lastrowid
     conn.close()
 
-    print(f"[DB] Stored cycle #{inserted_id} into SQLite audit ledger.")
+    print(f"[DB] Stored cycle #{inserted_id}: Class={predicted_class} | Label={efficacy_label} | Status={compliance_status}")
 
     return {
         "id": inserted_id,
