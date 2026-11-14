@@ -54,36 +54,47 @@ DB_PATH = os.path.join(BASE_DIR, "sanmist_audit.db")
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+    
+    # 1. Ensure table exists
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS cycle_records (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            station_id TEXT,
-            timestamp TEXT,
-            ambient_temp_c REAL,
-            relative_humidity_pct REAL,
-            flow_rate_ml_min REAL,
-            cycle_duration_sec REAL,
-            room_volume_m3 REAL,
-            sei_score REAL,
-            predicted_class INTEGER,
-            efficacy_label TEXT,
-            delivery_confirmed INTEGER,
-            estop_triggered INTEGER
+            timestamp TEXT NOT NULL,
+            station_id TEXT NOT NULL,
+            ambient_temp_c REAL NOT NULL,
+            relative_humidity_pct REAL NOT NULL,
+            flow_rate_ml_min REAL NOT NULL,
+            cycle_duration_sec REAL NOT NULL,
+            room_volume_m3 REAL NOT NULL,
+            sei_score REAL NOT NULL,
+            predicted_class INTEGER NOT NULL,
+            efficacy_label TEXT NOT NULL,
+            estop_triggered INTEGER NOT NULL DEFAULT 0
         )
     """)
+    
+    # 2. Add compliance_status if it is missing
+    cursor.execute("PRAGMA table_info(cycle_records)")
+    existing_columns = [col[1] for col in cursor.fetchall()]
+    
+    if "compliance_status" not in existing_columns:
+        cursor.execute("ALTER TABLE cycle_records ADD COLUMN compliance_status TEXT DEFAULT 'AUDIT VERIFIED'")
+        print("[DB] Added missing column 'compliance_status' to cycle_records.")
+        
     conn.commit()
     conn.close()
+    print(f"[DB] Initialized/verified schema at: {DB_PATH}")
 
 init_db()
 
 # 3. Request Data Schemas
 class CycleTelemetryInput(BaseModel):
     station_id: str = Field(default="MIST-BOH-01")
-    ambient_temp_c: float = Field(..., ge=15.0, le=50.0, description="Temperature in Celsius from DHT22")
-    relative_humidity_pct: float = Field(..., ge=20.0, le=100.0, description="Relative Humidity % from DHT22")
+    ambient_temp_c: float = Field(..., ge=0.0, le=60.0, description="Temperature in Celsius (0.0 allowed on E-Stop/abort)")
+    relative_humidity_pct: float = Field(..., ge=0.0, le=100.0, description="Relative Humidity % (0.0 allowed on E-Stop/abort)")
     flow_rate_ml_min: float = Field(..., ge=0.0, le=100.0, description="Flow rate in mL/min from YF-S401 proxy")
-    cycle_duration_sec: float = Field(..., ge=10.0, le=600.0, description="Misting duration in seconds")
-    room_volume_m3: float = Field(default=25.0, ge=5.0, le=200.0, description="Kitchen zone volume in m³")
+    cycle_duration_sec: float = Field(..., ge=0.0, le=600.0, description="Misting duration in seconds (sub-10s allowed on E-Stop)")
+    room_volume_m3: float = Field(default=1.0, gt=0, le=200.0, description="Target room/zone volume in m³")
     delivery_confirmed: bool = Field(default=True)
     estop_triggered: bool = Field(default=False)
 
@@ -97,59 +108,78 @@ def health_check():
     }
 
 @app.post("/api/v1/telemetry/evaluate")
-def evaluate_and_log_cycle(data: CycleTelemetryInput):
-    if model is None:
-        raise HTTPException(status_code=503, detail="XGBoost model not loaded.")
+def evaluate_and_log_cycle(cycle: CycleTelemetryInput) -> dict:
+    # ---------------------------------------------------------
+    # 1. E-Stop vs Normal Cycle Branching
+    # ---------------------------------------------------------
+    if cycle.estop_triggered:
+        sei_score = 0.0
+        predicted_class = 0
+        efficacy_label = "Fail"
+        compliance_status = "SAFETY INTERLOCK TRIPPED"
+        print(f"[SAFETY] Emergency Stop activated! Cycle halted at {cycle.cycle_duration_sec:.1f}s.")
+    else:
+        # Standard Sanitization Efficacy Index (SEI) calculation
+        duration_min = cycle.cycle_duration_sec / 60.0
+        sei_score = round((cycle.flow_rate_ml_min * duration_min) / cycle.room_volume_m3, 3)
 
-    # Empirical Saturation Efficiency Index (SEI) calculation
-    sei = ((data.flow_rate_ml_min * (data.cycle_duration_sec / 60.0)) / data.room_volume_m3) * (1.0 - (data.relative_humidity_pct / 150.0))
-    
-    # Feature vector matching training columns
-    features = [[
-        data.ambient_temp_c,
-        data.relative_humidity_pct,
-        data.flow_rate_ml_min,
-        data.cycle_duration_sec,
-        data.room_volume_m3
-    ]]
-    
-    # Model inference
-    pred_class = int(model.predict(features)[0])
-    label_map = {0: "Fail", 1: "Marginal", 2: "Pass"}
-    efficacy_label = label_map.get(pred_class, "Unknown")
-    
-    # If emergency stop was triggered, override to Fail
-    if data.estop_triggered:
-        pred_class = 0
-        efficacy_label = "Fail (E-Stop Triggered)"
+        # Predict with XGBoost model if loaded, otherwise fallback
+        if "model" in globals() and model is not None:
+            features = [[
+                cycle.ambient_temp_c,
+                cycle.relative_humidity_pct,
+                cycle.flow_rate_ml_min,
+                cycle.cycle_duration_sec,
+                cycle.room_volume_m3
+            ]]
+            predicted_class = int(model.predict(features)[0])
+            label_map = {0: "Fail", 1: "Marginal", 2: "Pass"}
+            efficacy_label = label_map.get(predicted_class, "Pass" if sei_score >= 2.800 else "Fail")
+        else:
+            predicted_class = 2 if sei_score >= 2.800 else 0
+            efficacy_label = "Pass" if sei_score >= 2.800 else "Fail"
 
-    # Persist record to SQLite
-    now = datetime.utcnow().isoformat() + "Z"
+        compliance_status = "AUDIT VERIFIED" if (predicted_class == 2 or sei_score >= 2.800) else "REQUIRES ATTENTION"
+
+    # ---------------------------------------------------------
+    # 2. Commit Record to SQLite Audit Ledger
+    # ---------------------------------------------------------
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO cycle_records (
-            station_id, timestamp, ambient_temp_c, relative_humidity_pct,
-            flow_rate_ml_min, cycle_duration_sec, room_volume_m3,
-            sei_score, predicted_class, efficacy_label, delivery_confirmed, estop_triggered
+            timestamp, station_id, ambient_temp_c, relative_humidity_pct,
+            flow_rate_ml_min, cycle_duration_sec, room_volume_m3, sei_score,
+            predicted_class, efficacy_label, compliance_status, estop_triggered
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
-        data.station_id, now, data.ambient_temp_c, data.relative_humidity_pct,
-        data.flow_rate_ml_min, data.cycle_duration_sec, data.room_volume_m3,
-        round(sei, 3), pred_class, efficacy_label, int(data.delivery_confirmed), int(data.estop_triggered)
+        datetime.utcnow().isoformat(),
+        cycle.station_id,
+        cycle.ambient_temp_c,
+        cycle.relative_humidity_pct,
+        cycle.flow_rate_ml_min,
+        cycle.cycle_duration_sec,
+        cycle.room_volume_m3,
+        sei_score,
+        predicted_class,
+        efficacy_label,
+        compliance_status,
+        1 if cycle.estop_triggered else 0
     ))
     conn.commit()
-    cycle_id = cursor.lastrowid
+    inserted_id = cursor.lastrowid
     conn.close()
 
+    print(f"[DB] Stored cycle #{inserted_id} into SQLite audit ledger.")
+
     return {
-        "cycle_id": cycle_id,
-        "timestamp": now,
-        "station_id": data.station_id,
-        "sei_score": round(sei, 3),
-        "predicted_class": pred_class,
+        "id": inserted_id,
+        "station_id": cycle.station_id,
+        "sei_score": sei_score,
+        "predicted_class": predicted_class,
         "efficacy_label": efficacy_label,
-        "compliance_status": "AUDIT_VERIFIED" if pred_class == 2 else "REQUIRES_ATTENTION"
+        "compliance_status": compliance_status,
+        "estop_triggered": cycle.estop_triggered
     }
 
 @app.get("/api/v1/records")
@@ -177,10 +207,15 @@ def on_mqtt_message(client, userdata, msg):
         print(f"\n[MQTT RECV] Inbound ESP32 Telemetry: {raw_payload}")
         data_dict = json.loads(raw_payload)
         
-        # Validate schema, run XGBoost prediction, and save to SQLite
+        # Schema validation (accepts 0 values from relaxed Pydantic model)
         cycle_in = CycleTelemetryInput(**data_dict)
+        
+        # Branching, inference, and persistence
         result = evaluate_and_log_cycle(cycle_in)
-        print(f"[ML EVALUATION RESULT] Station: {result['station_id']} | Class: {result['efficacy_label']} | SEI Score: {result['sei_score']} | Status: {result['compliance_status']}")
+        print(f"[ML EVALUATION RESULT] Station: {result['station_id']} | "
+              f"Class: {result['efficacy_label']} | "
+              f"SEI Score: {result['sei_score']} | "
+              f"Status: {result['compliance_status']}")
     except Exception as err:
         print(f"[MQTT ERROR] Failed to process payload: {err}")
 
@@ -193,3 +228,25 @@ try:
     print("[MQTT] Background thread started, listening on broker.emqx.io:1883...")
 except Exception as e:
     print(f"[WARN] Could not connect to MQTT broker: {e}")
+
+import json
+
+class CycleTriggerRequest(BaseModel):
+    duration_sec: int = Field(default=30, ge=5, le=300, description="Misting duration in seconds")
+    room_volume_m3: float = Field(default=1.0, gt=0, description="Target room volume in m3")
+
+@app.post("/api/v1/trigger")
+def trigger_cycle(req: CycleTriggerRequest):
+    """Dispatches a remote misting start command to the station over MQTT."""
+    payload = json.dumps({
+        "command": "START",
+        "duration_sec": req.duration_sec,
+        "room_volume_m3": req.room_volume_m3
+    })
+    # Publish to the control topic
+    mqtt_client.publish("sanmist/control/trigger", payload)
+    return {
+        "status": "DISPATCHED",
+        "duration_sec": req.duration_sec,
+        "room_volume_m3": req.room_volume_m3
+    }
