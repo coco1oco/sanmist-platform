@@ -4,30 +4,41 @@
 #include <ArduinoJson.h>
 #include "DHT.h"
 
-// Hardware Pin Definitions
-#define PIN_DHT          15
-#define PIN_POT          34    // YF-S401 analog proxy (ADC1 CH6)
-#define PIN_BUZZER       19
-#define PIN_ATOMIZER     4     // Relay / LED indicator
-#define PIN_BTN_START    18    // Active-LOW (INPUT_PULLUP)
-#define PIN_BTN_ESTOP    5     // Active-LOW (INPUT_PULLUP)
+// Hardware Pin Definitions (aligned with firmware/diagram.json)
+#define PIN_DHT          32    // Matches diagram.json esp:32 -> dht:SDA
+#define PIN_POT          33    // Matches diagram.json esp:33 -> flow_pot:SIG (ADC1 CH5)
+#define PIN_BUZZER       19    // Matches diagram.json esp:19 -> buzzer:2
+#define PIN_ATOMIZER     23    // Matches diagram.json esp:23 -> led_mist:A
+#define PIN_BTN_START    18    // Matches diagram.json esp:18 -> btn_start (INPUT_PULLUP)
+#define PIN_BTN_ESTOP    5     // Matches diagram.json esp:5 -> btn_estop (INPUT_PULLUP)
 
 #define DHTTYPE DHT22
 DHT dht(PIN_DHT, DHTTYPE);
 
-// Dynamic Runtime Parameters
-unsigned long currentMistDurationMs = 30000; // default 30s
-float currentRoomVolumeM3 = 1.0;            // default 1.0 m³
+// Manual cycle defaults (never overwritten by remote triggers)
+const unsigned long DEFAULT_MIST_DURATION_MS = 30000; // default 30s
+const float DEFAULT_ROOM_VOLUME_M3 = 1.0f;            // default 1.0 m^3
+
+// Remote trigger runtime parameters
+unsigned long remoteMistDurationMs = DEFAULT_MIST_DURATION_MS;
+float remoteRoomVolumeM3 = DEFAULT_ROOM_VOLUME_M3;
 bool remoteTriggerRequested = false;
+bool cycleInProgress = false;
 
 // Wokwi WiFi Credentials
 const char* ssid = "Wokwi-GUEST";
 const char* password = "";
 
-// Public MQTT Broker & Topics
-const char* mqtt_server = "broker.emqx.io";
+// MQTT Broker (supports private/authenticated broker + shared device payload auth)
+const char* mqtt_server_host = "broker.emqx.io";
+const char* mqtt_server_fallback_ip = "44.232.241.40";
 const int mqtt_port = 1883;
+const char* mqtt_username = "";
+const char* mqtt_password = "";
+const char* device_auth_key = "sanmist-edge-key-2026";
+const unsigned int BUZZER_FREQ_HZ = 2000;
 const char* telemetry_topic = "sanmist/devices/MIST-BOH-01/telemetry";
+const char* status_topic = "sanmist/devices/MIST-BOH-01/status";
 const char* control_topic = "sanmist/control/trigger";
 
 WiFiClient espClient;
@@ -35,6 +46,10 @@ PubSubClient client(espClient);
 
 volatile bool estop_active = false;
 unsigned long lastMqttRetry = 0;
+unsigned long lastSensorPoll = 0;
+float lastReportedTemp = -999.0f;
+float lastReportedHum = -999.0f;
+float lastReportedFlow = -999.0f;
 
 void IRAM_ATTR handleEmergencyStop() {
     estop_active = true;
@@ -46,9 +61,10 @@ void IRAM_ATTR handleEmergencyStop() {
 // Inbound MQTT Message Listener (Remote Dispatch)
 // -------------------------------------------------------------
 void onMqttMessage(char* topic, byte* payload, unsigned int length) {
-    char message[length + 1];
-    memcpy(message, payload, length);
-    message[length] = '\0';
+    char message[256];
+    size_t copyLen = (length < sizeof(message) - 1) ? length : (sizeof(message) - 1);
+    memcpy(message, payload, copyLen);
+    message[copyLen] = '\0';
 
     Serial.print("[MQTT INBOUND] Topic: ");
     Serial.println(topic);
@@ -56,17 +72,27 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     Serial.println(message);
 
     if (String(topic) == control_topic) {
-        StaticJsonDocument<256> doc;
-        DeserializationError error = deserializeJson(doc, message);
+        JsonDocument doc;
+        DeserializationError error = deserializeJson(doc, payload, length);
 
         if (!error) {
+            const char* incomingKey = doc["auth_key"] | "";
+            if (strlen(device_auth_key) > 0 && strcmp(incomingKey, device_auth_key) != 0) {
+                Serial.println("[MQTT AUTH] Rejected trigger: invalid or missing auth_key.");
+                return;
+            }
             const char* command = doc["command"];
             if (command && strcmp(command, "START") == 0) {
-                int durationSec = doc["duration_sec"] | 30;
-                float roomVol = doc["room_volume_m3"] | 1.0;
+                if (cycleInProgress) {
+                    Serial.println("[REMOTE TRIGGER] Ignored: cycle already in progress.");
+                    return;
+                }
 
-                currentMistDurationMs = (unsigned long)durationSec * 1000;
-                currentRoomVolumeM3 = roomVol;
+                int durationSec = doc["duration_sec"] | 30;
+                float roomVol = doc["room_volume_m3"] | 1.0f;
+
+                remoteMistDurationMs = (unsigned long)durationSec * 1000UL;
+                remoteRoomVolumeM3 = roomVol;
                 remoteTriggerRequested = true;
 
                 Serial.println("==================================================");
@@ -90,27 +116,92 @@ void setupWiFi() {
         delay(300);
         Serial.print(".");
     }
+
+    // Configure public DNS servers to avoid ISP DNS interception while keeping DHCP lease
+    WiFi.config(WiFi.localIP(), WiFi.gatewayIP(), WiFi.subnetMask(), IPAddress(8, 8, 8, 8), IPAddress(1, 1, 1, 1));
+
     Serial.println("\n[WIFI] Connected! IP Address: ");
     Serial.println(WiFi.localIP());
 }
 
-// Non-blocking MQTT connection with unique client ID
+void readSanitizedEnvironment(float& outTemp, float& outHum) {
+    float rawTemp = dht.readTemperature();
+    float rawHum = dht.readHumidity();
+    outTemp = isnan(rawTemp) ? ((lastReportedTemp > -100.0f) ? lastReportedTemp : 28.5f) : rawTemp;
+    outHum = isnan(rawHum) ? ((lastReportedHum > -100.0f) ? lastReportedHum : 65.0f) : rawHum;
+}
+
+void pollAndPublishLiveSensors(bool forcePublish = false) {
+    float temp = 28.5f;
+    float hum = 65.0f;
+    readSanitizedEnvironment(temp, hum);
+
+    int potValue = analogRead(PIN_POT);
+    float flow = map(potValue, 0, 4095, 10, 50); // mL/min proxy
+
+    if (forcePublish ||
+        fabs(temp - lastReportedTemp) >= 0.2f ||
+        fabs(hum - lastReportedHum) >= 0.5f ||
+        fabs(flow - lastReportedFlow) >= 1.0f) {
+        lastReportedTemp = temp;
+        lastReportedHum = hum;
+        lastReportedFlow = flow;
+
+        Serial.printf("[SENSOR] Live DHT22 & Flow -> Temp: %.1f C | Hum: %.1f %% | Flow: %.1f mL/min\n", temp, hum, flow);
+
+        if (client.connected()) {
+            JsonDocument doc;
+            doc["station_id"] = "MIST-BOH-01";
+            doc["ambient_temp_c"] = temp;
+            doc["relative_humidity_pct"] = hum;
+            doc["flow_rate_ml_min"] = flow;
+            doc["cycle_in_progress"] = cycleInProgress;
+            doc["auth_key"] = device_auth_key;
+
+            char buffer[320];
+            serializeJson(doc, buffer, sizeof(buffer));
+            client.publish(status_topic, buffer);
+        }
+    }
+}
+
+// Non-blocking MQTT connection with hostname-first resolution and IPv4 fallback
 void reconnectMQTT() {
     if (client.connected()) return;
 
     unsigned long now = millis();
     if (now - lastMqttRetry > 2000) {
         lastMqttRetry = now;
-        Serial.print("[MQTT] Attempting connection... ");
+        Serial.print("[MQTT] Attempting connection to ");
+        Serial.print(mqtt_server_host);
+        Serial.print("... ");
 
         // Hardware-seeded randomized client ID prevents broker session collisions
         String clientId = "MistSan-ESP32-" + String(micros(), HEX) + "-" + String(random(1000, 9999));
 
-        if (client.connect(clientId.c_str())) {
+        client.setServer(mqtt_server_host, mqtt_port);
+        bool connected = (strlen(mqtt_username) > 0)
+            ? client.connect(clientId.c_str(), mqtt_username, mqtt_password)
+            : client.connect(clientId.c_str());
+
+        if (!connected) {
+            Serial.print("failed (rc=");
+            Serial.print(client.state());
+            Serial.print("), trying fallback IP ");
+            Serial.print(mqtt_server_fallback_ip);
+            Serial.print("... ");
+            client.setServer(mqtt_server_fallback_ip, mqtt_port);
+            connected = (strlen(mqtt_username) > 0)
+                ? client.connect(clientId.c_str(), mqtt_username, mqtt_password)
+                : client.connect(clientId.c_str());
+        }
+
+        if (connected) {
             Serial.println("connected!");
             client.subscribe(control_topic);
             Serial.print("[MQTT SUB] Subscribed to topic: ");
             Serial.println(control_topic);
+            pollAndPublishLiveSensors(true);
         } else {
             Serial.print("failed, rc=");
             Serial.print(client.state());
@@ -120,41 +211,50 @@ void reconnectMQTT() {
 }
 
 void publishTelemetry(float temp, float hum, float flow, float duration, float roomVol, bool estop) {
-    StaticJsonDocument<256> doc;
+    JsonDocument doc;
     doc["station_id"] = "MIST-BOH-01";
     doc["ambient_temp_c"] = temp;
     doc["relative_humidity_pct"] = hum;
     doc["flow_rate_ml_min"] = flow;
     doc["cycle_duration_sec"] = duration;
     doc["room_volume_m3"] = roomVol;
-    doc["delivery_confirmed"] = (flow > 5.0 && !estop);
+    doc["delivery_confirmed"] = (flow > 5.0f && !estop);
     doc["estop_triggered"] = estop;
+    doc["auth_key"] = device_auth_key;
 
-    char buffer[256];
-    serializeJson(doc, buffer);
+    char buffer[384];
+    serializeJson(doc, buffer, sizeof(buffer));
     client.publish(telemetry_topic, buffer);
     Serial.print("[MQTT PUB] Sent Payload: ");
     Serial.println(buffer);
 }
 
 void runSanitizationCycle(unsigned long durationMs, float roomVol) {
+    cycleInProgress = true;
     estop_active = false;
     unsigned long cycleStart = millis();
 
+    float latestTemp = 28.5f;
+    float latestHum = 65.0f;
+    readSanitizedEnvironment(latestTemp, latestHum);
+
     Serial.println("[START] Pre-cycle audible warning initiated...");
-    digitalWrite(PIN_BUZZER, HIGH);
-    
+    tone(PIN_BUZZER, BUZZER_FREQ_HZ);
+
     // Non-blocking 1-second pre-warning check for E-Stop
     unsigned long bzStart = millis();
     while (millis() - bzStart < 1000) {
         if (estop_active) {
+            noTone(PIN_BUZZER);
             digitalWrite(PIN_BUZZER, LOW);
             Serial.println("[HALT] E-Stop triggered during pre-cycle warning!");
-            publishTelemetry(0, 0, 0, (millis() - cycleStart) / 1000.0, roomVol, true);
+            publishTelemetry(latestTemp, latestHum, 0, (millis() - cycleStart) / 1000.0f, roomVol, true);
+            cycleInProgress = false;
             return;
         }
         delay(10);
     }
+    noTone(PIN_BUZZER);
     digitalWrite(PIN_BUZZER, LOW);
 
     Serial.println("[MISTING] Atomizer active...");
@@ -168,7 +268,9 @@ void runSanitizationCycle(unsigned long durationMs, float roomVol) {
         if (estop_active) {
             Serial.println("[HALT] EMERGENCY STOP ACTIVATED DURING MISTING!");
             digitalWrite(PIN_ATOMIZER, LOW);
-            publishTelemetry(0, 0, 0, (millis() - mistStart) / 1000.0, roomVol, true);
+            readSanitizedEnvironment(latestTemp, latestHum);
+            publishTelemetry(latestTemp, latestHum, 0, (millis() - mistStart) / 1000.0f, roomVol, true);
+            cycleInProgress = false;
             return;
         }
 
@@ -177,7 +279,12 @@ void runSanitizationCycle(unsigned long durationMs, float roomVol) {
         totalFlow += currentFlow;
         samples++;
 
-        // Keep MQTT connection alive and responsive
+        // Sample DHT22 periodically (~2s cadence matches DHT22 spec)
+        if (samples % 20 == 0) {
+            readSanitizedEnvironment(latestTemp, latestHum);
+        }
+
+        // Keep MQTT connection alive and ignore mid-cycle remote triggers
         client.loop();
         delay(100);
     }
@@ -186,13 +293,13 @@ void runSanitizationCycle(unsigned long durationMs, float roomVol) {
     Serial.println("[COMPLETE] Sanitization cycle finished!");
 
     float avgFlow = (samples > 0) ? (totalFlow / samples) : 0;
-    float temp = dht.readTemperature();
-    float hum = dht.readHumidity();
+    readSanitizedEnvironment(latestTemp, latestHum);
+    lastReportedTemp = latestTemp;
+    lastReportedHum = latestHum;
+    lastReportedFlow = avgFlow;
 
-    if (isnan(temp)) temp = 28.5;
-    if (isnan(hum)) hum = 65.0;
-
-    publishTelemetry(temp, hum, avgFlow, durationMs / 1000.0, roomVol, false);
+    publishTelemetry(latestTemp, latestHum, avgFlow, durationMs / 1000.0f, roomVol, false);
+    cycleInProgress = false;
 }
 
 void setup() {
@@ -208,7 +315,7 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(PIN_BTN_ESTOP), handleEmergencyStop, FALLING);
 
     setupWiFi();
-    client.setServer(mqtt_server, mqtt_port);
+    client.setServer(mqtt_server_host, mqtt_port);
     client.setCallback(onMqttMessage);
 
     Serial.println("--- MistSan ESP32 Firmware Ready ---");
@@ -221,18 +328,24 @@ void loop() {
         client.loop();
     }
 
-    // Physical manual start button check
+    unsigned long now = millis();
+    if (now - lastSensorPoll >= 2500) {
+        lastSensorPoll = now;
+        pollAndPublishLiveSensors();
+    }
+
+    // Physical manual start button check uses fixed manual defaults
     if (digitalRead(PIN_BTN_START) == LOW) {
         delay(30); // Debounce
         if (digitalRead(PIN_BTN_START) == LOW) {
-            runSanitizationCycle(currentMistDurationMs, currentRoomVolumeM3);
+            runSanitizationCycle(DEFAULT_MIST_DURATION_MS, DEFAULT_ROOM_VOLUME_M3);
         }
     }
 
-    // Remote Web MQTT Trigger
+    // Remote Web MQTT Trigger uses requested remote parameters
     if (remoteTriggerRequested) {
         remoteTriggerRequested = false;
-        runSanitizationCycle(currentMistDurationMs, currentRoomVolumeM3);
+        runSanitizationCycle(remoteMistDurationMs, remoteRoomVolumeM3);
     }
 
     delay(10); // Prevents CPU starvation and watchdog timeouts

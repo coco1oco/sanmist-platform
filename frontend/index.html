@@ -1,317 +1,2070 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MistSan - Live Compliance & IoT Telemetry</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <title>MistSan Command Center — Operational &amp; Compliance Ledger</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="tailwind.css" />
   <style>
-    @keyframes pulse-fast {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.3; }
+    :root,
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #070b14;
+      --surface: #0f1623;
+      --surface-2: #151f30;
+      --surface-3: #1b273c;
+      --border: #223049;
+      --border-strong: #36496b;
+      --text: #f1f5f9;
+      --text-2: #cbd5e1;
+      --text-3: #8a99b2;
+      --primary: #10b981;
+      --primary-hover: #059669;
+      --primary-fg: #03150e;
+      --focus: #38bdf8;
+      --sei: #818cf8;
+      --pass: #34d399;
+      --pass-soft: rgba(16, 185, 129, 0.13);
+      --marginal: #fbbf24;
+      --marginal-soft: rgba(245, 158, 11, 0.13);
+      --fail: #f87171;
+      --fail-soft: rgba(239, 68, 68, 0.13);
+      --estop: #fb7185;
+      --estop-soft: rgba(244, 63, 94, 0.16);
+      --info-soft: rgba(56, 189, 248, 0.12);
+      --overlay: rgba(3, 7, 15, 0.78);
     }
-    .animate-pulse-fast { animation: pulse-fast 1s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --bg: #eef2f6;
+      --surface: #ffffff;
+      --surface-2: #f8fafc;
+      --surface-3: #e2e8f0;
+      --border: #d5dde7;
+      --border-strong: #94a3b8;
+      --text: #0f172a;
+      --text-2: #334155;
+      --text-3: #64748b;
+      --primary: #0f766e;
+      --primary-hover: #0d625b;
+      --primary-fg: #ffffff;
+      --focus: #0284c7;
+      --sei: #4338ca;
+      --pass: #15803d;
+      --pass-soft: #dcfce7;
+      --marginal: #b45309;
+      --marginal-soft: #fef3c7;
+      --fail: #b91c1c;
+      --fail-soft: #fee2e2;
+      --estop: #be123c;
+      --estop-soft: #ffe4e6;
+      --info-soft: #e0f2fe;
+      --overlay: rgba(15, 23, 42, 0.56);
+    }
+
+    * {
+      box-sizing: border-box;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+    }
+
+    html,
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Inter", system-ui, -apple-system, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+    }
+
+    ::-webkit-scrollbar,
+    html::-webkit-scrollbar,
+    body::-webkit-scrollbar,
+    *::-webkit-scrollbar {
+      display: none !important;
+      width: 0 !important;
+      height: 0 !important;
+      background: transparent !important;
+    }
+
+    .mono {
+      font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+
+    .subpanel {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+    }
+
+    .surface-input {
+      background: var(--surface-2);
+      color: var(--text);
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+    }
+
+    .surface-input:focus {
+      outline: none;
+      border-color: var(--focus);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus) 25%, transparent);
+    }
+
+    .btn-cta {
+      background: var(--primary);
+      color: var(--primary-fg);
+      font-weight: 700;
+      border-radius: 9px;
+      transition: background-color 0.14s ease, opacity 0.14s ease;
+    }
+
+    .btn-cta:hover:not(:disabled) {
+      background: var(--primary-hover);
+    }
+
+    .btn-cta:disabled {
+      opacity: 0.48;
+      cursor: not-allowed;
+    }
+
+    .btn-ghost {
+      background: var(--surface-2);
+      color: var(--text-2);
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      font-weight: 600;
+      transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+    }
+
+    .btn-ghost:hover:not(:disabled) {
+      background: var(--surface-3);
+      color: var(--text);
+    }
+
+    .btn-ghost:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .theme-switch {
+      display: inline-flex;
+      padding: 2px;
+      border-radius: 8px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+    }
+
+    .theme-switch button {
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-3);
+    }
+
+    .theme-switch button[aria-pressed="true"] {
+      background: var(--surface-3);
+      color: var(--text);
+    }
+
+    .preset-chip {
+      border: 1px solid var(--border-strong);
+      background: var(--surface-2);
+      color: var(--text-2);
+      border-radius: 7px;
+      padding: 5px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+    }
+
+    .preset-chip:hover {
+      background: var(--surface-3);
+      color: var(--text);
+    }
+
+    .preset-chip[aria-pressed="true"] {
+      background: var(--info-soft);
+      border-color: var(--focus);
+      color: var(--text);
+    }
+
+    .kpi-btn {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 7px 9px;
+      text-align: left;
+      transition: border-color 0.12s ease, background-color 0.12s ease;
+    }
+
+    .kpi-btn:hover {
+      background: var(--surface-3);
+      border-color: var(--border-strong);
+    }
+
+    .kpi-btn[aria-pressed="true"] {
+      background: var(--info-soft);
+      border-color: var(--focus);
+    }
+
+    .filter-pill {
+      padding: 5px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-3);
+      transition: background-color 0.12s ease, color 0.12s ease;
+    }
+
+    .filter-pill:hover {
+      color: var(--text);
+    }
+
+    .filter-pill[aria-pressed="true"] {
+      background: var(--surface-3);
+      color: var(--text);
+    }
+
+    input[type="number"]::-webkit-inner-spin-button,
+    input[type="number"]::-webkit-outer-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+
+    input[type="number"] {
+      -moz-appearance: textfield;
+    }
+
+    .muted {
+      color: var(--text-3);
+    }
+
+    .secondary-text {
+      color: var(--text-2);
+    }
+
+    .row-hover:hover {
+      background: var(--surface-2);
+    }
   </style>
 </head>
-<body class="bg-slate-950 text-slate-100 min-h-screen p-6 font-sans antialiased">
-  <div class="max-w-7xl mx-auto space-y-6">
-    
-    <!-- Top Bar -->
-    <header class="flex flex-col md:flex-row md:items-center justify-between pb-4 border-b border-slate-800 gap-4">
-      <div>
-        <div class="flex items-center space-x-3">
-          <span class="inline-flex h-3 w-3 rounded-full bg-emerald-500 animate-pulse-fast"></span>
-          <h1 class="text-2xl font-bold tracking-tight text-white">MistSan Operational Ledger</h1>
+
+<body class="min-h-screen antialiased">
+
+  <!-- Authentication Screen -->
+  <div id="login-overlay" class="fixed inset-0 z-50 flex flex-col" style="background: var(--bg);">
+    <header class="w-full px-6 py-4 flex items-center justify-between border-b" style="border-color: var(--border);">
+      <div class="flex items-baseline gap-2.5">
+        <span class="text-lg font-bold tracking-tight">MistSan</span>
+        <span class="text-xs muted">Command Center · Station MIST-BOH-01</span>
+      </div>
+      <div class="theme-switch" role="group" aria-label="Theme switcher">
+        <button type="button" data-theme-btn="dark" aria-pressed="true">Dark</button>
+        <button type="button" data-theme-btn="light" aria-pressed="false">Light</button>
+      </div>
+    </header>
+
+    <div class="flex-1 flex items-center justify-center p-6">
+      <div class="panel w-full max-w-md p-7 space-y-5 shadow-2xl">
+        <div class="space-y-1">
+          <p class="text-[11px] uppercase tracking-wider font-semibold muted">PD 856 &amp; RA 10611 Audit Platform</p>
+          <h1 class="text-2xl font-bold tracking-tight">Operator Authentication</h1>
+          <p class="text-xs secondary-text">Sign in to monitor live sensors, inspect SHA-256 records, and dispatch cycles.</p>
         </div>
-        <p class="text-xs text-slate-400 mt-1">
-          Automated Dry-Fog Sanitization • PD 856 & RA 10611 Compliant
+
+        <div id="login-error" class="hidden rounded-lg px-3.5 py-2.5 text-xs font-medium border"
+          style="background: var(--fail-soft); border-color: var(--fail); color: var(--fail);">
+        </div>
+
+        <form id="login-form" class="space-y-3.5">
+          <div>
+            <label for="login-username" class="block text-xs font-semibold mb-1.5 secondary-text">Username</label>
+            <input id="login-username" type="text" autocomplete="username" required placeholder="admin"
+              class="surface-input w-full px-3.5 py-2.5 text-sm" />
+          </div>
+
+          <div>
+            <label for="login-password" class="block text-xs font-semibold mb-1.5 secondary-text">Password</label>
+            <div class="relative">
+              <input id="login-password" type="password" autocomplete="current-password" required placeholder="••••••••••"
+                class="surface-input w-full px-3.5 py-2.5 pr-16 text-sm" />
+              <button id="toggle-login-password" type="button"
+                class="absolute right-1.5 top-1/2 -translate-y-1/2 px-2.5 py-1 text-xs font-semibold rounded muted hover:text-white">
+                Show
+              </button>
+            </div>
+          </div>
+
+          <button id="login-submit-btn" type="submit" class="btn-cta w-full py-2.5 px-4 text-sm">
+            Sign In to Command Center
+          </button>
+        </form>
+
+        <div class="pt-4 border-t space-y-2" style="border-color: var(--border);">
+          <p class="text-[11px] uppercase tracking-wider muted mono">Quick Demo Credentials</p>
+          <div class="grid grid-cols-2 gap-2">
+            <button type="button" onclick="fillDemoCredentials('admin', 'sanmist2026')"
+              class="subpanel px-3 py-2 text-left hover:opacity-90 transition">
+              <div class="text-xs font-semibold" style="color: var(--pass);">Admin Demo</div>
+              <div class="mono text-[11px] muted">admin / sanmist2026</div>
+            </button>
+            <button type="button" onclick="fillDemoCredentials('operator', 'operator123')"
+              class="subpanel px-3 py-2 text-left hover:opacity-90 transition">
+              <div class="text-xs font-semibold" style="color: var(--focus);">Operator Demo</div>
+              <div class="mono text-[11px] muted">operator / operator123</div>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Safety Confirmation Modal -->
+  <div id="confirm-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4"
+    style="background: var(--overlay);" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title">
+    <div id="confirm-modal-panel" class="panel w-full max-w-md p-6 space-y-4 shadow-2xl">
+      <div>
+        <p class="text-[11px] uppercase tracking-wider font-semibold muted">Pre-Dispatch Safety Verification</p>
+        <h2 id="confirm-modal-title" class="text-xl font-bold mt-0.5">Confirm Sanitization Cycle?</h2>
+        <p class="text-xs secondary-text mt-1">
+          The station will sound a 1-second audible buzzer warning before activating the atomizer.
         </p>
       </div>
-      <div class="flex items-center space-x-3 text-xs">
-        <span class="bg-slate-800 px-3 py-1.5 rounded-md border border-slate-700 text-slate-300">
-          Broker: <span class="text-emerald-400 font-mono">broker.emqx.io</span>
+
+      <dl class="subpanel divide-y text-xs" style="border-color: var(--border);">
+        <div class="flex items-center justify-between px-3.5 py-2.5" style="border-color: var(--border);">
+          <dt class="muted">Station Unit</dt>
+          <dd class="font-semibold mono">MIST-BOH-01 (Prep Station)</dd>
+        </div>
+        <div class="flex items-center justify-between px-3.5 py-2.5" style="border-color: var(--border);">
+          <dt class="muted">Misting Duration</dt>
+          <dd id="confirm-duration-val" class="font-semibold mono">32 seconds</dd>
+        </div>
+        <div class="flex items-center justify-between px-3.5 py-2.5" style="border-color: var(--border);">
+          <dt class="muted">Room Volume</dt>
+          <dd id="confirm-volume-val" class="font-semibold mono">1.0 m³</dd>
+        </div>
+        <div class="flex items-center justify-between px-3.5 py-2.5">
+          <dt class="muted">Planning Estimate</dt>
+          <dd id="confirm-estimate-val" class="font-semibold mono">2.880 SEI</dd>
+        </div>
+      </dl>
+
+      <div id="confirm-low-warning" class="hidden rounded-lg px-3.5 py-2.5 text-xs space-y-2 border"
+        style="background: var(--marginal-soft); border-color: var(--marginal);">
+        <p class="font-semibold" style="color: var(--marginal);">
+          Estimated SEI is below the 2.800 PD 856 target.
+        </p>
+        <p class="secondary-text">
+          This cycle may classify as Marginal or Fail and require re-sanitization.
+        </p>
+        <button id="btn-confirm-use-target" type="button" class="btn-ghost px-3 py-1.5 text-xs">
+          Use Suggested Target
+        </button>
+      </div>
+
+      <label for="confirm-area-clear"
+        class="subpanel flex items-start gap-2.5 p-3 cursor-pointer text-xs font-medium select-none">
+        <input id="confirm-area-clear" type="checkbox" class="mt-0.5 h-4 w-4 accent-emerald-500" />
+        <span>I have inspected the prep zone and verified the area is clear of personnel.</span>
+      </label>
+
+      <div class="grid grid-cols-2 gap-2.5 pt-1">
+        <button id="btn-confirm-cancel" type="button" class="btn-ghost py-2.5 px-4 text-sm">
+          Cancel
+        </button>
+        <button id="btn-confirm-dispatch" type="button" class="btn-cta py-2.5 px-4 text-sm" disabled>
+          Start Cycle
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Full-Screen Command Center Workspace -->
+  <div id="app-shell" class="hidden w-full min-h-screen flex flex-col">
+
+    <!-- Sticky Full-Width Top Command Bar -->
+    <header class="sticky top-0 z-30 w-full border-b px-5 py-2.5 flex flex-wrap items-center justify-between gap-3"
+      style="background: var(--surface); border-color: var(--border);">
+      <div class="flex flex-wrap items-center gap-3">
+        <h1 class="text-lg font-bold tracking-tight">MistSan Command Center</h1>
+        <span class="mono text-[11px] px-2 py-0.5 rounded font-semibold subpanel">MIST-BOH-01</span>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2 text-xs">
+        <span class="subpanel px-2.5 py-1.5 secondary-text">
+          Operator: <strong id="header-user" class="font-semibold" style="color: var(--text);">--</strong>
         </span>
-        <button id="refresh-btn" class="bg-blue-600 hover:bg-blue-500 px-3 py-1.5 rounded-md text-white font-medium transition shadow-sm">
-          Refresh Now
+        <div class="theme-switch" role="group" aria-label="Theme switcher">
+          <button type="button" data-theme-btn="dark" aria-pressed="true">Dark</button>
+          <button type="button" data-theme-btn="light" aria-pressed="false">Light</button>
+        </div>
+        <button id="refresh-btn" type="button" class="btn-ghost px-3 py-1.5 text-xs">
+          Refresh
+        </button>
+        <button id="logout-btn" type="button" class="btn-ghost px-3 py-1.5 text-xs">
+          Sign Out
         </button>
       </div>
     </header>
 
-    <!-- Real-Time Metric Cards -->
-    <section class="grid grid-cols-1 md:grid-cols-4 gap-4">
-      <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
-        <span class="text-xs text-slate-400 uppercase tracking-wider">Station Unit</span>
-        <div class="text-xl font-bold text-white mt-1" id="stat-station">MIST-BOH-01</div>
-        <span class="text-xs text-slate-500">Back-of-House (Prep Station)</span>
+    <!-- Full-Width Main Content -->
+    <main class="w-full px-5 py-4 space-y-4 flex-1">
+
+      <!-- Global Service Error Notice -->
+      <div id="service-error-banner" class="hidden rounded-lg px-4 py-2.5 border flex items-center justify-between gap-3 text-xs"
+        style="background: var(--fail-soft); border-color: var(--fail); color: var(--fail);">
+        <span id="service-error-text">Unable to reach backend service.</span>
+        <button id="btn-retry-fetch" type="button" class="btn-ghost px-2.5 py-1 text-xs">Retry</button>
       </div>
 
-      <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
-        <span class="text-xs text-slate-400 uppercase tracking-wider">Latest Efficacy (XGBoost)</span>
-        <div class="text-xl font-bold mt-1 text-slate-400" id="stat-efficacy">Waiting...</div>
-        <span class="text-xs text-slate-500" id="stat-compliance">Status: Initializing</span>
-      </div>
+      <!-- ROW 1: Above-the-Fold 3-Column Industrial Cockpit -->
+      <section class="grid grid-cols-1 xl:grid-cols-12 gap-4 items-stretch" aria-label="Primary station cockpit">
 
-      <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
-        <span class="text-xs text-slate-400 uppercase tracking-wider">Latest SEI Score</span>
-        <div class="text-xl font-bold text-indigo-400 mt-1 font-mono" id="stat-sei">--</div>
-        <span class="text-xs text-slate-500">Threshold: ≥ 2.800 (Pass)</span>
-      </div>
+        <!-- COLUMN 1: Manual Cycle Dispatch + Presets + Live Countdown -->
+        <div id="control" class="xl:col-span-4 panel p-4 flex flex-col justify-between gap-3">
+          <div class="space-y-3">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 class="text-base font-bold leading-tight">Start a Cycle</h2>
+                <p class="text-[11px] muted">Immediate MQTT dispatch with safety confirmation</p>
+              </div>
+              <span id="sei-estimate-preview"
+                class="mono text-[11px] font-semibold px-2.5 py-1 rounded-md border"
+                style="background: var(--pass-soft); border-color: var(--pass); color: var(--pass);">
+                Est. SEI: 2.880 · Pass (≥ 2.800)
+              </span>
+            </div>
 
-      <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
-        <span class="text-xs text-slate-400 uppercase tracking-wider">Audit Log Count</span>
-        <div class="text-xl font-bold text-white mt-1 font-mono" id="stat-cycles">0</div>
-        <span class="text-xs text-slate-500">Stored in SQLite Audit Ledger</span>
-      </div>
-    </section>
+            <!-- Inline Controls: Duration Stepper + Direct Room Volume -->
+            <div class="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+              <div class="sm:col-span-7">
+                <label for="input-duration" class="block text-[11px] uppercase tracking-wider font-semibold muted mb-1">
+                  Duration (sec)
+                </label>
+                <div class="flex items-stretch">
+                  <button id="btn-dur-minus" type="button" aria-label="Decrease duration by 5 seconds"
+                    class="surface-input px-3 font-bold text-base rounded-r-none border-r-0 hover:opacity-80">
+                    −
+                  </button>
+                  <input id="input-duration" type="number" min="5" max="300" step="1" value="32"
+                    class="surface-input w-full px-2.5 py-2 text-base font-semibold mono text-center rounded-none" />
+                  <button id="btn-dur-plus" type="button" aria-label="Increase duration by 5 seconds"
+                    class="surface-input px-3 font-bold text-base rounded-l-none border-l-0 hover:opacity-80">
+                    +
+                  </button>
+                </div>
+              </div>
 
-    <!-- Remote Station Trigger Control Card -->
-    <section class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg">
-      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div class="flex items-center space-x-2">
-            <span class="inline-block h-2.5 w-2.5 rounded-full bg-blue-500"></span>
-            <h3 class="font-semibold text-white text-base">Remote Station Trigger</h3>
+              <div class="sm:col-span-5">
+                <label for="input-volume" class="block text-[11px] uppercase tracking-wider font-semibold muted mb-1">
+                  Room Size (m³)
+                </label>
+                <div class="relative">
+                  <input id="input-volume" type="number" min="0.1" max="200" step="0.1" value="1.0"
+                    class="surface-input w-full px-3 py-2 pr-9 text-base font-semibold mono text-right" />
+                  <span class="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs muted pointer-events-none">m³</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Quick Presets + Env Basis -->
+            <div class="space-y-1.5">
+              <div id="preset-chips" class="flex flex-wrap gap-1.5" role="group" aria-label="Quick duration presets">
+              </div>
+              <p id="sei-env-basis" class="mono text-[11px] muted">
+                Env basis: 25.0°C · 65% RH · 30.0 mL/min (nominal)
+              </p>
+            </div>
           </div>
-          <p class="text-xs text-slate-400 mt-1">
-            Configure target mist duration and room volume to execute cycle via MQTT
-          </p>
+
+          <!-- Active Cycle Progress Panel (shown during dispatch countdown) -->
+          <div id="cycle-progress-panel" class="hidden subpanel p-3 space-y-2">
+            <div class="flex items-center justify-between text-xs gap-2">
+              <span id="cycle-phase-label" class="font-semibold" style="color: var(--pass);">Pre-Cycle Warning Active</span>
+              <span id="cycle-countdown" class="mono font-bold">--s remaining</span>
+            </div>
+            <div class="w-full h-2 rounded-full overflow-hidden" style="background: var(--surface-3);">
+              <div id="cycle-progress-bar" class="h-full transition-all duration-200 rounded-full"
+                style="width: 0%; background: var(--primary);"></div>
+            </div>
+            <div id="cycle-overdue-controls" class="hidden flex items-center justify-between gap-2 pt-1 text-[11px]">
+              <span class="muted">Awaiting telemetry confirmation from station…</span>
+              <div class="flex items-center gap-1.5">
+                <button id="btn-cycle-check" type="button" class="btn-ghost px-2.5 py-1 text-[11px]">Check Now</button>
+                <button id="btn-cycle-reset" type="button" class="btn-ghost px-2.5 py-1 text-[11px]">Clear</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Always-Visible Primary Dispatch Button -->
+          <div class="space-y-1.5 pt-1">
+            <button id="btn-open-confirm" type="button" class="btn-cta w-full py-2.5 px-4 text-sm tracking-wide">
+              Review &amp; Start Cycle
+            </button>
+            <p id="trigger-feedback" class="hidden mono text-[11px]"></p>
+            <p id="dispatch-helper-text" class="text-[11px] muted text-center">
+              Opens safety confirmation before energizing atomizer.
+            </p>
+          </div>
         </div>
-        
-        <div class="flex flex-wrap items-center gap-3">
+
+        <!-- COLUMN 2: Last Cycle Outcome + Visual SEI Scale + 6-Cell KPI Filter Strip -->
+        <div class="xl:col-span-4 panel p-4 flex flex-col justify-between gap-3">
+          <div class="space-y-2.5">
+            <div class="flex items-center justify-between gap-2">
+              <div class="flex items-center gap-2">
+                <span class="text-[11px] uppercase tracking-wider font-semibold muted">Last Cycle</span>
+                <span id="stat-station" class="mono text-xs font-semibold px-2 py-0.5 rounded subpanel">MIST-BOH-01</span>
+              </div>
+              <span id="stat-outcome-badge"
+                class="mono text-[11px] font-semibold px-2.5 py-0.5 rounded-full border"
+                style="background: var(--surface-2); border-color: var(--border-strong); color: var(--text-2);">
+                INITIALIZING
+              </span>
+            </div>
+
+            <div>
+              <h2 id="stat-headline" class="text-lg font-bold leading-snug">Waiting for cycle records…</h2>
+              <p id="stat-guidance" class="text-xs secondary-text mt-0.5">
+                The most recent ML-audited cycle will appear here.
+              </p>
+            </div>
+
+            <!-- Outcome Fact Grid -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-xs">
+              <div class="subpanel px-2.5 py-2">
+                <div class="text-[10px] uppercase muted">Last Time (PHT)</div>
+                <div id="stat-last-time" class="mono font-semibold mt-0.5 truncate">--:--:--</div>
+              </div>
+              <div class="subpanel px-2.5 py-2">
+                <div class="text-[10px] uppercase muted">Efficacy</div>
+                <div id="stat-efficacy" class="font-bold mt-0.5 truncate">--</div>
+              </div>
+              <div class="subpanel px-2.5 py-2">
+                <div class="text-[10px] uppercase muted">Confidence</div>
+                <div id="stat-confidence" class="mono font-semibold mt-0.5 truncate">--</div>
+              </div>
+              <div class="subpanel px-2.5 py-2">
+                <div class="text-[10px] uppercase muted">Safety</div>
+                <div id="stat-safety" class="font-semibold mt-0.5 truncate">--</div>
+              </div>
+            </div>
+
+            <!-- Visual SEI Threshold Scale -->
+            <div class="subpanel p-3 space-y-1.5">
+              <div class="flex items-center justify-between text-xs">
+                <span class="secondary-text font-medium">Latest SEI Score · Target ≥ 2.800</span>
+                <span id="stat-sei" class="mono text-base font-bold" style="color: var(--sei);">--</span>
+              </div>
+              <div class="relative h-2.5 w-full rounded-full overflow-hidden" style="background: var(--surface-3);">
+                <div id="sei-gauge-bar" class="h-full rounded-full transition-all duration-300"
+                  style="width: 0%; background: var(--sei);"></div>
+                <div class="absolute top-0 bottom-0 w-0.5" style="left: 45%; background: var(--marginal);"
+                  title="Marginal Threshold (1.800)"></div>
+                <div class="absolute top-0 bottom-0 w-0.5" style="left: 70%; background: var(--pass);"
+                  title="PD 856 Pass Threshold (2.800)"></div>
+              </div>
+              <div class="relative flex justify-between text-[10px] mono muted">
+                <span>0.0</span>
+                <span style="position: absolute; left: 45%; transform: translateX(-50%); color: var(--marginal);">1.800</span>
+                <span style="position: absolute; left: 70%; transform: translateX(-50%); color: var(--pass);">2.800</span>
+                <span>4.0+</span>
+              </div>
+              <div id="stat-compliance" class="mono text-[11px] muted">Compliance: --</div>
+            </div>
+          </div>
+
+          <!-- 6-Cell Interactive KPI Strip -->
+          <div class="grid grid-cols-3 sm:grid-cols-6 gap-1.5" role="group" aria-label="Cycle KPI breakdown and filters">
+            <button type="button" class="kpi-btn" data-kpi-filter="all" aria-pressed="true">
+              <div class="text-[10px] uppercase muted">Total</div>
+              <div id="stat-cycles" class="mono text-sm font-bold">0</div>
+            </button>
+            <div class="subpanel px-2 py-1.5 text-left">
+              <div class="text-[10px] uppercase muted">Pass Rate</div>
+              <div id="stat-pass-rate" class="mono text-sm font-bold" style="color: var(--pass);">0.0%</div>
+            </div>
+            <button type="button" class="kpi-btn" data-kpi-filter="pass" aria-pressed="false">
+              <div class="text-[10px] uppercase" style="color: var(--pass);">Pass</div>
+              <div id="count-pass" class="mono text-sm font-bold">0</div>
+            </button>
+            <button type="button" class="kpi-btn" data-kpi-filter="marginal" aria-pressed="false">
+              <div class="text-[10px] uppercase" style="color: var(--marginal);">Marginal</div>
+              <div id="count-marginal" class="mono text-sm font-bold">0</div>
+            </button>
+            <button type="button" class="kpi-btn" data-kpi-filter="fail" aria-pressed="false">
+              <div class="text-[10px] uppercase" style="color: var(--fail);">Fail</div>
+              <div id="count-fail" class="mono text-sm font-bold">0</div>
+            </button>
+            <button type="button" class="kpi-btn" data-kpi-filter="e-stop" aria-pressed="false">
+              <div class="text-[10px] uppercase" style="color: var(--estop);">E-Stop</div>
+              <div id="count-estop" class="mono text-sm font-bold">0</div>
+            </button>
+          </div>
+        </div>
+
+        <!-- COLUMN 3: Live Sensor Readings + Station/MQTT/Ledger Connection Status -->
+        <div class="xl:col-span-4 panel p-4 flex flex-col justify-between gap-3">
+          <!-- Latest Readings Sub-Section -->
+          <div class="space-y-2">
+            <div class="flex items-center justify-between gap-2">
+              <h2 class="text-base font-bold leading-tight">Latest Readings</h2>
+              <span id="sensor-source-badge"
+                class="mono text-[10px] font-semibold px-2 py-0.5 rounded border"
+                style="background: var(--surface-2); border-color: var(--border-strong); color: var(--text-3);">
+                WAITING
+              </span>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2">
+              <div class="subpanel px-3 py-2 flex items-center justify-between gap-2">
+                <div>
+                  <div class="text-[10px] uppercase tracking-wider muted">Ambient Temp</div>
+                  <div id="sensor-temp" class="mono text-base font-bold mt-0.5" style="color: #38bdf8;">-- °C</div>
+                </div>
+                <span class="mono text-[10px] muted">DHT22</span>
+              </div>
+
+              <div class="subpanel px-3 py-2 flex items-center justify-between gap-2">
+                <div>
+                  <div class="text-[10px] uppercase tracking-wider muted">Rel. Humidity</div>
+                  <div id="sensor-hum" class="mono text-base font-bold mt-0.5" style="color: #22d3ee;">-- %</div>
+                </div>
+                <span class="mono text-[10px] muted">DHT22</span>
+              </div>
+
+              <div class="subpanel px-3 py-2 flex items-center justify-between gap-2">
+                <div>
+                  <div class="text-[10px] uppercase tracking-wider muted">Atomizer Flow</div>
+                  <div id="sensor-flow" class="mono text-base font-bold mt-0.5" style="color: #a78bfa;">-- mL/min</div>
+                </div>
+                <span class="mono text-[10px] muted">YF-S401</span>
+              </div>
+
+              <div class="subpanel px-3 py-2 flex items-center justify-between gap-2">
+                <div>
+                  <div class="text-[10px] uppercase tracking-wider muted">Last Spec</div>
+                  <div id="sensor-dur-vol" class="mono text-sm font-bold mt-0.5">--s / -- m³</div>
+                </div>
+                <span class="mono text-[10px] muted">SPEC</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Connection & Cryptographic Integrity Sub-Section -->
+          <div class="subpanel p-3 space-y-2 text-xs">
+            <div class="flex items-center justify-between border-b pb-1.5" style="border-color: var(--border);">
+              <h3 class="font-bold text-xs uppercase tracking-wider secondary-text">Connection &amp; Integrity</h3>
+              <span id="last-updated" class="mono text-[11px] muted">Connecting…</span>
+            </div>
+
+            <dl class="space-y-1.5">
+              <div class="flex items-center justify-between gap-2">
+                <dt class="muted">Station Heartbeat</dt>
+                <dd id="conn-station" class="mono font-semibold text-right">Unknown · no heartbeat</dd>
+              </div>
+              <div class="flex items-center justify-between gap-2">
+                <dt class="muted">MistSan API Service</dt>
+                <dd id="conn-service" class="mono font-semibold text-right">Checking…</dd>
+              </div>
+              <div class="flex items-center justify-between gap-2">
+                <dt class="muted">MQTT (<span class="mono">broker.emqx.io</span>)</dt>
+                <dd id="broker-status" class="mono font-semibold text-right">Checking…</dd>
+              </div>
+              <div class="flex items-center justify-between gap-2">
+                <dt class="muted">SHA-256 Ledger</dt>
+                <dd id="ledger-integrity-badge" class="mono font-semibold text-right">Pending</dd>
+              </div>
+            </dl>
+          </div>
+        </div>
+      </section>
+
+      <!-- ROW 2: Full-Width Tamper-Evident Audit Ledger Table -->
+      <section class="panel overflow-hidden" aria-label="Compliance audit ledger">
+        <div class="px-5 py-3.5 border-b flex flex-col lg:flex-row lg:items-center justify-between gap-3"
+          style="border-color: var(--border);">
           <div>
-            <label for="input-duration" class="block text-[11px] text-slate-400 font-mono uppercase">Duration (s)</label>
-            <input 
-              id="input-duration" 
-              type="number" 
-              value="30" 
-              min="5" 
-              max="300"
-              class="bg-slate-800 text-white border border-slate-700 rounded-lg px-3 py-1.5 w-24 text-sm font-mono focus:outline-none focus:border-blue-500" 
-            />
+            <h2 class="text-base font-bold">Immutable Compliance Audit Ledger</h2>
+            <p class="text-xs muted">
+              Auto-refreshes every 3 seconds · Click any row to inspect full SHA-256 hash linkage
+            </p>
           </div>
-          <div>
-            <label for="input-volume" class="block text-[11px] text-slate-400 font-mono uppercase">Room Vol (m³)</label>
-            <input 
-              id="input-volume" 
-              type="number" 
-              step="0.1" 
-              value="1.0" 
-              min="0.1" 
-              max="50"
-              class="bg-slate-800 text-white border border-slate-700 rounded-lg px-3 py-1.5 w-24 text-sm font-mono focus:outline-none focus:border-blue-500" 
-            />
+
+          <div class="flex flex-wrap items-center gap-2">
+            <input id="search-input" type="search" placeholder="Search station, ID, status…"
+              class="surface-input px-3 py-1.5 text-xs w-56" aria-label="Search audit records" />
+
+            <div id="status-filter-group" class="subpanel p-1 flex flex-wrap items-center gap-0.5"
+              role="group" aria-label="Filter records by efficacy">
+              <button type="button" data-status="all" class="filter-pill" aria-pressed="true">All</button>
+              <button type="button" data-status="pass" class="filter-pill" aria-pressed="false">Pass</button>
+              <button type="button" data-status="marginal" class="filter-pill" aria-pressed="false">Marginal</button>
+              <button type="button" data-status="fail" class="filter-pill" aria-pressed="false">Fail</button>
+              <button type="button" data-status="e-stop" class="filter-pill" aria-pressed="false">E-Stop</button>
+            </div>
+
+            <button id="verify-ledger-btn" type="button"
+              class="px-3 py-1.5 rounded-lg text-xs font-semibold border transition"
+              style="background: rgba(99, 102, 241, 0.16); border-color: var(--sei); color: var(--sei);">
+              Verify Ledger Chain
+            </button>
+
+            <button id="export-csv-btn" type="button" class="btn-ghost px-3 py-1.5 text-xs">
+              Export CSV
+            </button>
           </div>
-          <button 
-            id="btn-remote-start" 
-            onclick="dispatchRemoteCycle()"
-            class="self-end bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-sm font-medium px-4 py-2 rounded-lg transition shadow-lg shadow-emerald-900/30"
-          >
-            Dispatch Cycle
-          </button>
         </div>
-      </div>
-      <p id="trigger-feedback" class="text-xs mt-3 font-mono hidden"></p>
-    </section>
 
-    <!-- Audit Records Table -->
-    <section class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
-      <div class="px-6 py-4 border-b border-slate-800 flex justify-between items-center">
-        <div>
-          <h2 class="font-semibold text-white">Immutable Sanitization Logbook</h2>
-          <p class="text-xs text-slate-400">Records signed and streamed via digital twin telemetry</p>
+        <div id="ledger-verify-banner" class="hidden px-5 py-2.5 border-b text-xs"
+          style="border-color: var(--border);"></div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs border-collapse">
+            <thead class="uppercase mono text-[11px]" style="background: var(--surface-2); color: var(--text-3);">
+              <tr class="border-b" style="border-color: var(--border);">
+                <th class="px-4 py-2.5">ID</th>
+                <th class="px-4 py-2.5">Timestamp (PHT)</th>
+                <th class="px-4 py-2.5">Station</th>
+                <th class="px-4 py-2.5">Temp / Hum</th>
+                <th class="px-4 py-2.5">Flow Rate</th>
+                <th class="px-4 py-2.5">Duration / Vol</th>
+                <th class="px-4 py-2.5">SEI Score</th>
+                <th class="px-4 py-2.5">Prediction</th>
+                <th class="px-4 py-2.5">Safety Status</th>
+                <th class="px-4 py-2.5">SHA-256 Hash</th>
+              </tr>
+            </thead>
+            <tbody id="table-body" class="divide-y" style="border-color: var(--border);">
+              <tr>
+                <td colspan="10" class="px-5 py-8 text-center muted">
+                  Sign in to load audit records…
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
-        <span class="text-xs text-slate-500 font-mono" id="last-updated">Auto-refreshing every 3s</span>
-      </div>
 
-      <div class="overflow-x-auto">
-        <table class="w-full text-left text-sm text-slate-300">
-          <thead class="bg-slate-800/60 text-xs uppercase text-slate-400 font-mono">
-            <tr>
-              <th class="px-6 py-3">ID</th>
-              <th class="px-6 py-3">Timestamp</th>
-              <th class="px-6 py-3">Station</th>
-              <th class="px-6 py-3">Temp / Hum</th>
-              <th class="px-6 py-3">Flow Rate</th>
-              <th class="px-6 py-3">Duration</th>
-              <th class="px-6 py-3">SEI Score</th>
-              <th class="px-6 py-3">Prediction</th>
-              <th class="px-6 py-3">Safety Status</th>
-            </tr>
-          </thead>
-          <tbody id="table-body" class="divide-y divide-slate-800 font-sans">
-            <tr>
-              <td colspan="9" class="px-6 py-8 text-center text-slate-500">
-                Fetching records from FastAPI backend...
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
+        <div id="ledger-pagination" class="px-5 py-3 border-t flex flex-wrap items-center justify-between gap-3 text-xs"
+          style="border-color: var(--border); background: var(--surface-2);">
+          <span id="pagination-summary" class="mono muted">Showing 0 of 0 records</span>
+          <div class="flex flex-wrap items-center gap-2">
+            <label for="page-size-select" class="muted">Rows:</label>
+            <select id="page-size-select" class="surface-input px-2 py-1 text-xs mono" aria-label="Rows per page">
+              <option value="10" selected>10</option>
+              <option value="25">25</option>
+              <option value="50">50</option>
+            </select>
+            <button id="btn-page-prev" type="button" class="btn-ghost px-2.5 py-1 text-xs" disabled>Prev</button>
+            <span id="pagination-page-label" class="mono secondary-text px-1">Page 1 of 1</span>
+            <button id="btn-page-next" type="button" class="btn-ghost px-2.5 py-1 text-xs" disabled>Next</button>
+          </div>
+        </div>
+      </section>
+    </main>
   </div>
 
   <script>
-    const API_URL = "http://localhost:8000/api/v1/records";
-    const TRIGGER_URL = "http://localhost:8000/api/v1/trigger";
+    const API_BASE = window.location.hostname
+      ? `http://${window.location.hostname}:8000`
+      : "http://localhost:8000";
+
+    const TOKEN_KEY = "sanmist_auth_token";
+    const THEME_KEY = "mistsan_theme";
+    const SEI_TARGET = 2.8;
+    const STALE_AFTER_MS = 15000;
+
+    let pollTimer = null;
+    let countdownTimer = null;
+    let activeStatusFilter = "all";
+    let currentRecords = [];
+    let currentPage = 1;
+    let pageSize = 10;
+    let totalFilteredRecords = 0;
+    let liveSensorState = null;
+    let latestRecord = null;
+    let activeCycle = null;
+    let lastReceivedAt = null;
+    let isDispatching = false;
+    const expandedRecordIds = new Set();
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function applyTheme(theme) {
+      const normalized = theme === "light" ? "light" : "dark";
+      document.documentElement.dataset.theme = normalized;
+      document.querySelectorAll("[data-theme-btn]").forEach((btn) => {
+        btn.setAttribute("aria-pressed", btn.dataset.themeBtn === normalized ? "true" : "false");
+      });
+      try {
+        localStorage.setItem(THEME_KEY, normalized);
+      } catch {
+        // Ignore storage errors
+      }
+    }
+
+    function initTheme() {
+      try {
+        const saved = localStorage.getItem(THEME_KEY);
+        applyTheme(saved === "light" ? "light" : "dark");
+      } catch {
+        applyTheme("dark");
+      }
+    }
+
+    // Exact 1:1 mirror of backend compute_evaporation_adjusted_sei:
+    // uses live DHT22 temp/hum + live flow_rate_ml_min when streaming, else 25.0C / 65% RH / 30.0 mL/min nominal.
+    function computeSeiLossFactor(env) {
+      const temp = Number.isFinite(env?.temp) ? env.temp : 25.0;
+      const hum = Number.isFinite(env?.hum) ? env.hum : 65.0;
+      const evapLoss = (temp - 25.0) * 0.003 - (hum - 65.0) * 0.001;
+      return Math.max(0.85, Math.min(1.15, 1.0 - evapLoss));
+    }
+
+    function estimateSei(duration, volume, env) {
+      if (!Number.isFinite(duration) || !Number.isFinite(volume) || duration <= 0 || volume <= 0) {
+        return null;
+      }
+      const flow = Number.isFinite(env?.flow) && env.flow > 0 ? env.flow : 30.0;
+      const lossFactor = computeSeiLossFactor(env);
+      const effectiveFlow = flow * lossFactor;
+      const durationMin = duration / 60.0;
+      return Math.round(((effectiveFlow * durationMin) / volume) * 1000) / 1000;
+    }
+
+    function suggestedDuration(volume, env) {
+      if (!Number.isFinite(volume) || volume <= 0) return null;
+      const flow = Number.isFinite(env?.flow) && env.flow > 0 ? env.flow : 30.0;
+      const lossFactor = computeSeiLossFactor(env);
+      const perSec = ((flow * lossFactor) / 60.0) / volume;
+      let sec = Math.max(5, Math.ceil(SEI_TARGET / perSec - 1e-9));
+      while (sec <= 300 && estimateSei(sec, volume, env) < SEI_TARGET) {
+        sec += 1;
+      }
+      return sec <= 300 ? sec : null;
+    }
+
+    function durationPresets(volume, env) {
+      const target = suggestedDuration(volume, env);
+      const standard = [45, 60, 90, 120].filter((sec) => sec !== target);
+      const presets = target !== null ? [{ seconds: target, isTarget: true }] : [];
+      for (const seconds of standard) {
+        if (presets.length >= 4) break;
+        presets.push({ seconds, isTarget: false });
+      }
+      return presets;
+    }
+
+    function getToken() {
+      return localStorage.getItem(TOKEN_KEY);
+    }
+
+    function setToken(token) {
+      localStorage.setItem(TOKEN_KEY, token);
+    }
+
+    function clearToken() {
+      localStorage.removeItem(TOKEN_KEY);
+    }
+
+    function stopPolling() {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    }
+
+    function startPolling() {
+      stopPolling();
+      pollTimer = setInterval(refreshDashboard, 3000);
+    }
+
+    function formatTruncatedHash(hash) {
+      const raw = String(hash ?? "").trim();
+      if (!raw) return "--";
+      if (raw.length <= 16) return raw;
+      return `${raw.slice(0, 8)}…${raw.slice(-6)}`;
+    }
+
+    function formatManilaTime(rawTimestamp) {
+      if (!rawTimestamp) return "--:--:--";
+      let isoStr = String(rawTimestamp);
+      if (!isoStr.endsWith("Z") && !isoStr.includes("+")) {
+        isoStr += "Z";
+      }
+      const dateObj = new Date(isoStr);
+      return isNaN(dateObj.getTime())
+        ? String(rawTimestamp)
+        : dateObj.toLocaleTimeString("en-US", {
+            timeZone: "Asia/Manila",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            hour12: true,
+          });
+    }
+
+    function dismissLedgerBanner() {
+      const banner = document.getElementById("ledger-verify-banner");
+      if (banner) {
+        banner.classList.add("hidden");
+        delete banner.dataset.state;
+      }
+    }
+
+    function updateLedgerIntegrityBadge(isVerified, latestHash) {
+      const badge = document.getElementById("ledger-integrity-badge");
+      if (!badge) return;
+
+      const cleanHash = String(latestHash ?? "").trim();
+      const shortHash = formatTruncatedHash(cleanHash);
+      badge.title = cleanHash ? `Latest SHA-256: ${cleanHash}` : "No hash chain records yet";
+
+      if (isVerified === true) {
+        badge.style.color = "var(--pass)";
+        badge.textContent = cleanHash ? `Verified (${shortHash})` : "Verified";
+      } else if (isVerified === false) {
+        badge.style.color = "var(--fail)";
+        badge.textContent = "Tamper Alert!";
+      } else {
+        badge.style.color = "var(--text-3)";
+        badge.textContent = "Pending";
+      }
+    }
+
+    function updateConnectionPanel(stats, apiReachable) {
+      const stationEl = document.getElementById("conn-station");
+      const serviceEl = document.getElementById("conn-service");
+      const brokerEl = document.getElementById("broker-status");
+      const updatedEl = document.getElementById("last-updated");
+
+      if (serviceEl) {
+        serviceEl.style.color = apiReachable ? "var(--pass)" : "var(--fail)";
+        serviceEl.textContent = apiReachable ? "Reachable" : "Unavailable";
+      }
+
+      if (brokerEl) {
+        if (!stats || typeof stats.mqtt_connected !== "boolean") {
+          brokerEl.style.color = "var(--text-3)";
+          brokerEl.textContent = "Status unknown";
+        } else if (stats.mqtt_connected) {
+          brokerEl.style.color = "var(--pass)";
+          brokerEl.textContent = "Connected";
+        } else {
+          brokerEl.style.color = "var(--fail)";
+          brokerEl.textContent = "Disconnected";
+        }
+      }
+
+      if (stationEl) {
+        if (!apiReachable) {
+          stationEl.style.color = "var(--fail)";
+          stationEl.textContent = "Unknown · service down";
+        } else if (stats?.live_telemetry?.updated_at) {
+          const updatedMs = new Date(stats.live_telemetry.updated_at).getTime();
+          const ageMs = Number.isNaN(updatedMs) ? Number.POSITIVE_INFINITY : Math.max(0, Date.now() - updatedMs);
+          if (ageMs <= STALE_AFTER_MS * 2) {
+            stationEl.style.color = "var(--pass)";
+            stationEl.textContent = stats.live_telemetry.cycle_in_progress
+              ? "Online · misting active"
+              : "Online · live telemetry";
+          } else {
+            stationEl.style.color = "var(--marginal)";
+            stationEl.textContent = "Standby · telemetry idle";
+          }
+        } else {
+          stationEl.style.color = "var(--text-3)";
+          stationEl.textContent = "Unknown · no heartbeat";
+        }
+      }
+
+      if (updatedEl) {
+        updatedEl.textContent = lastReceivedAt
+          ? `Polled ${new Date(lastReceivedAt).toLocaleTimeString()}`
+          : "Waiting…";
+      }
+    }
+
+    function renderPresetChips(currentDuration, volume) {
+      const container = document.getElementById("preset-chips");
+      if (!container) return;
+      const presets = durationPresets(volume, liveSensorState);
+      container.innerHTML = presets
+        .map((preset) => {
+          const pressed = currentDuration === preset.seconds ? "true" : "false";
+          const label = preset.isTarget ? `Target · ${preset.seconds}s` : `${preset.seconds}s`;
+          return `<button type="button" class="preset-chip mono" data-preset-sec="${preset.seconds}" aria-pressed="${pressed}">${label}</button>`;
+        })
+        .join("");
+
+      container.querySelectorAll("[data-preset-sec]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const sec = parseInt(btn.dataset.presetSec, 10);
+          if (Number.isFinite(sec)) {
+            document.getElementById("input-duration").value = String(sec);
+            updateSeiEstimatePreview();
+          }
+        });
+      });
+    }
+
+    function updateSeiEstimatePreview() {
+      const previewEl = document.getElementById("sei-estimate-preview");
+      const basisEl = document.getElementById("sei-env-basis");
+      const helperEl = document.getElementById("dispatch-helper-text");
+      const openBtn = document.getElementById("btn-open-confirm");
+      const durationEl = document.getElementById("input-duration");
+      const volumeEl = document.getElementById("input-volume");
+      if (!previewEl || !durationEl || !volumeEl) return;
+
+      const duration = parseInt(durationEl.value, 10);
+      const volume = parseFloat(volumeEl.value);
+      const validDuration = Number.isInteger(duration) && duration >= 5 && duration <= 300;
+      const validVolume = Number.isFinite(volume) && volume >= 0.1 && volume <= 200;
+
+      if (basisEl) {
+        if (liveSensorState) {
+          basisEl.textContent = `Env basis: ${liveSensorState.temp.toFixed(1)}°C · ${liveSensorState.hum.toFixed(0)}% RH · ${liveSensorState.flow.toFixed(1)} mL/min (live)`;
+        } else {
+          basisEl.textContent = "Env basis: 25.0°C · 65% RH · 30.0 mL/min (nominal)";
+        }
+      }
+
+      renderPresetChips(validDuration ? duration : null, validVolume ? volume : 1.0);
+
+      if (!validDuration || !validVolume) {
+        previewEl.style.background = "var(--surface-2)";
+        previewEl.style.borderColor = "var(--border-strong)";
+        previewEl.style.color = "var(--text-3)";
+        previewEl.textContent = "Est. SEI: -- · Invalid inputs";
+        if (openBtn) openBtn.disabled = true;
+        if (helperEl) {
+          helperEl.style.color = "var(--fail)";
+          helperEl.textContent = "Enter duration 5–300s and room volume 0.1–200 m³.";
+        }
+        return;
+      }
+
+      if (openBtn) openBtn.disabled = isDispatching;
+      const estSei = estimateSei(duration, volume, liveSensorState);
+      const formattedSei = estSei.toFixed(3);
+      const suggestion = suggestedDuration(volume, liveSensorState);
+
+      if (estSei >= 2.8) {
+        previewEl.style.background = "var(--pass-soft)";
+        previewEl.style.borderColor = "var(--pass)";
+        previewEl.style.color = "var(--pass)";
+        previewEl.textContent = `Est. SEI: ${formattedSei} · Pass (≥ 2.800)`;
+        if (helperEl) {
+          helperEl.style.color = "var(--text-3)";
+          helperEl.textContent = "Opens safety confirmation before energizing atomizer.";
+        }
+      } else if (estSei >= 1.8) {
+        previewEl.style.background = "var(--marginal-soft)";
+        previewEl.style.borderColor = "var(--marginal)";
+        previewEl.style.color = "var(--marginal)";
+        previewEl.textContent = `Est. SEI: ${formattedSei} · Marginal (< 2.800)`;
+        if (helperEl) {
+          helperEl.style.color = "var(--marginal)";
+          helperEl.textContent = suggestion
+            ? `Below 2.800 target — ${suggestion}s recommended for ${volume.toFixed(1)} m³.`
+            : "Below 2.800 target even at 300s maximum.";
+        }
+      } else {
+        previewEl.style.background = "var(--fail-soft)";
+        previewEl.style.borderColor = "var(--fail)";
+        previewEl.style.color = "var(--fail)";
+        previewEl.textContent = `Est. SEI: ${formattedSei} · Fail (< 1.800)`;
+        if (helperEl) {
+          helperEl.style.color = "var(--fail)";
+          helperEl.textContent = suggestion
+            ? `Below 2.800 target — ${suggestion}s recommended for ${volume.toFixed(1)} m³.`
+            : "Below target SEI.";
+        }
+      }
+    }
+
+    function updateLiveSensorStrip(liveTelemetry) {
+      if (!liveTelemetry) return;
+      const temp = Number(liveTelemetry.ambient_temp_c);
+      const hum = Number(liveTelemetry.relative_humidity_pct);
+      const flow = Number(liveTelemetry.flow_rate_ml_min);
+
+      liveSensorState = {
+        temp: Number.isFinite(temp) ? temp : 25.0,
+        hum: Number.isFinite(hum) ? hum : 65.0,
+        flow: Number.isFinite(flow) ? flow : 30.0,
+      };
+
+      document.getElementById("sensor-temp").textContent = `${liveSensorState.temp.toFixed(1)} °C`;
+      document.getElementById("sensor-hum").textContent = `${liveSensorState.hum.toFixed(1)} %`;
+      document.getElementById("sensor-flow").textContent = `${liveSensorState.flow.toFixed(1)} mL/min`;
+
+      const srcBadge = document.getElementById("sensor-source-badge");
+      if (srcBadge) {
+        srcBadge.style.background = "var(--pass-soft)";
+        srcBadge.style.borderColor = "var(--pass)";
+        srcBadge.style.color = "var(--pass)";
+        srcBadge.textContent = "LIVE STREAM";
+      }
+
+      updateSeiEstimatePreview();
+    }
+
+    function showLoginOverlay(message = "") {
+      stopPolling();
+      liveSensorState = null;
+      latestRecord = null;
+      activeCycle = null;
+      lastReceivedAt = null;
+      closeConfirmModal(true);
+      dismissLedgerBanner();
+      updateLedgerIntegrityBadge(undefined, "");
+      document.getElementById("app-shell").classList.add("hidden");
+      document.getElementById("login-overlay").classList.remove("hidden");
+      const errBox = document.getElementById("login-error");
+      if (message) {
+        errBox.textContent = message;
+        errBox.classList.remove("hidden");
+      } else {
+        errBox.classList.add("hidden");
+      }
+    }
+
+    function showDashboard(user) {
+      document.getElementById("login-overlay").classList.add("hidden");
+      document.getElementById("app-shell").classList.remove("hidden");
+      document.getElementById("header-user").textContent = `${user.full_name} (${user.role})`;
+    }
+
+    function fillDemoCredentials(username, password) {
+      document.getElementById("login-username").value = username;
+      document.getElementById("login-password").value = password;
+      document.getElementById("login-error").classList.add("hidden");
+    }
+
+    async function authFetch(path, options = {}) {
+      const token = getToken();
+      if (!token) {
+        showLoginOverlay("Please sign in to access the dashboard.");
+        throw new Error("Unauthenticated");
+      }
+
+      const headers = new Headers(options.headers || {});
+      headers.set("Authorization", `Bearer ${token}`);
+
+      const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+      if (res.status === 401) {
+        clearToken();
+        showLoginOverlay("Session expired or unauthorized. Please sign in again.");
+        throw new Error("Unauthorized");
+      }
+      return res;
+    }
 
     function getBadge(row) {
       const isEstop = Boolean(row.estop_triggered) || row.compliance_status === "SAFETY INTERLOCK TRIPPED";
-      const sei = Number(row.sei_score) || 0;
       const predClass = Number(row.predicted_class);
-      const label = row.efficacy_label || "";
+      const label = String(row.efficacy_label ?? "").toLowerCase();
+      const hasConfidence =
+        row.ml_confidence != null &&
+        row.ml_confidence !== "" &&
+        Number.isFinite(Number(row.ml_confidence));
+      const confSuffix = hasConfidence ? ` (${escapeHtml(Number(row.ml_confidence).toFixed(1))}%)` : "";
 
       if (isEstop) {
-        return `<span class="bg-rose-500/20 text-rose-300 border border-rose-500/40 px-2.5 py-0.5 rounded-full text-xs font-semibold">HALTED (E-STOP)</span>`;
+        return `<span class="px-2 py-0.5 rounded-full text-[11px] font-semibold border" style="background: var(--estop-soft); border-color: var(--estop); color: var(--estop);">HALTED (E-STOP)</span>`;
       }
-      // Regulatory compliance threshold override (PD 856 / RA 10611)
-      if (sei >= 2.800 || predClass === 2 || label.toLowerCase() === "pass") {
-        return `<span class="bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 px-2.5 py-0.5 rounded-full text-xs font-semibold">PASS (99.9%)</span>`;
+      if (label === "pass" || predClass === 2) {
+        return `<span class="px-2 py-0.5 rounded-full text-[11px] font-semibold border" style="background: var(--pass-soft); border-color: var(--pass); color: var(--pass);">PASS${confSuffix}</span>`;
       }
-      if (predClass === 1 || label.toLowerCase() === "marginal") {
-        return `<span class="bg-amber-500/20 text-amber-400 border border-amber-500/40 px-2.5 py-0.5 rounded-full text-xs font-semibold">MARGINAL</span>`;
+      if (label === "marginal" || predClass === 1) {
+        return `<span class="px-2 py-0.5 rounded-full text-[11px] font-semibold border" style="background: var(--marginal-soft); border-color: var(--marginal); color: var(--marginal);">MARGINAL${confSuffix}</span>`;
       }
-      return `<span class="bg-rose-500/20 text-rose-400 border border-rose-500/40 px-2.5 py-0.5 rounded-full text-xs font-semibold">FAIL</span>`;
+      return `<span class="px-2 py-0.5 rounded-full text-[11px] font-semibold border" style="background: var(--fail-soft); border-color: var(--fail); color: var(--fail);">FAIL${confSuffix}</span>`;
     }
 
-    async function dispatchRemoteCycle() {
-      const durationInput = document.getElementById("input-duration");
-      const volumeInput = document.getElementById("input-volume");
-      const duration = parseInt(durationInput.value, 10);
-      const volume = parseFloat(volumeInput.value);
+    function updateSeiGauge(seiScore, isEstop) {
+      const gaugeBar = document.getElementById("sei-gauge-bar");
+      if (!gaugeBar) return;
+      const clampedPct = isEstop ? 0 : Math.max(0, Math.min(100, (seiScore / 4.0) * 100));
+      gaugeBar.style.width = `${clampedPct.toFixed(1)}%`;
+
+      if (isEstop || seiScore < 1.8) {
+        gaugeBar.style.background = "var(--fail)";
+      } else if (seiScore < 2.8) {
+        gaugeBar.style.background = "var(--marginal)";
+      } else {
+        gaugeBar.style.background = "var(--pass)";
+      }
+    }
+
+    function updateSummaryCards(latest) {
+      if (!latest) return;
+
+      const latestSei = Number(latest.sei_score) || 0;
+      const isEstop = Boolean(latest.estop_triggered) || latest.compliance_status === "SAFETY INTERLOCK TRIPPED";
+      const labelLower = String(latest.efficacy_label ?? "").toLowerCase();
+      const isPass = !isEstop && (labelLower === "pass" || Number(latest.predicted_class) === 2);
+      const isMarginal = !isEstop && (labelLower === "marginal" || Number(latest.predicted_class) === 1);
+      const hasConfidence =
+        latest.ml_confidence != null &&
+        latest.ml_confidence !== "" &&
+        Number.isFinite(Number(latest.ml_confidence));
+
+      document.getElementById("stat-station").textContent = latest.station_id || "MIST-BOH-01";
+      document.getElementById("stat-last-time").textContent = formatManilaTime(latest.timestamp);
+      document.getElementById("stat-sei").textContent = latestSei.toFixed(3);
+      document.getElementById("stat-confidence").textContent =
+        hasConfidence ? `${Number(latest.ml_confidence).toFixed(1)}%` : "Rule Check";
+      document.getElementById("stat-safety").textContent = isEstop ? "E-Stop Active" : "Normal Delivery";
+      document.getElementById("stat-safety").style.color = isEstop ? "var(--estop)" : "var(--pass)";
+
+      updateSeiGauge(latestSei, isEstop);
+
+      const badgeEl = document.getElementById("stat-outcome-badge");
+      const headlineEl = document.getElementById("stat-headline");
+      const guidanceEl = document.getElementById("stat-guidance");
+      const effEl = document.getElementById("stat-efficacy");
+      const compEl = document.getElementById("stat-compliance");
+
+      if (isEstop) {
+        badgeEl.style.background = "var(--estop-soft)";
+        badgeEl.style.borderColor = "var(--estop)";
+        badgeEl.style.color = "var(--estop)";
+        badgeEl.textContent = "HALTED · E-STOP";
+        headlineEl.textContent = "Last cycle halted by E-Stop";
+        guidanceEl.textContent = "Clear the physical safety interlock before starting another cycle.";
+        effEl.textContent = "Fail (E-Stop)";
+        effEl.style.color = "var(--estop)";
+        compEl.textContent = "Compliance: SAFETY INTERLOCK TRIPPED";
+        compEl.style.color = "var(--estop)";
+      } else if (isPass) {
+        badgeEl.style.background = "var(--pass-soft)";
+        badgeEl.style.borderColor = "var(--pass)";
+        badgeEl.style.color = "var(--pass)";
+        badgeEl.textContent = "PASSED";
+        headlineEl.textContent = "Last cycle passed target";
+        guidanceEl.textContent = `Achieved SEI ${latestSei.toFixed(3)} (target ≥ 2.800). Area sanitized.`;
+        effEl.textContent = "Pass";
+        effEl.style.color = "var(--pass)";
+        compEl.textContent = "Compliance: AUDIT VERIFIED";
+        compEl.style.color = "var(--pass)";
+      } else if (isMarginal) {
+        badgeEl.style.background = "var(--marginal-soft)";
+        badgeEl.style.borderColor = "var(--marginal)";
+        badgeEl.style.color = "var(--marginal)";
+        badgeEl.textContent = "MARGINAL";
+        headlineEl.textContent = "Last cycle was marginal";
+        guidanceEl.textContent = `SEI ${latestSei.toFixed(3)} fell below 2.800. Run another cycle before use.`;
+        effEl.textContent = "Marginal";
+        effEl.style.color = "var(--marginal)";
+        compEl.textContent = "Compliance: REQUIRES ATTENTION";
+        compEl.style.color = "var(--marginal)";
+      } else {
+        badgeEl.style.background = "var(--fail-soft)";
+        badgeEl.style.borderColor = "var(--fail)";
+        badgeEl.style.color = "var(--fail)";
+        badgeEl.textContent = "FAILED";
+        headlineEl.textContent = "Last cycle failed target";
+        guidanceEl.textContent = `SEI ${latestSei.toFixed(3)} did not meet 2.800. Re-run cycle.`;
+        effEl.textContent = "Fail";
+        effEl.style.color = "var(--fail)";
+        compEl.textContent = "Compliance: REQUIRES ATTENTION";
+        compEl.style.color = "var(--fail)";
+      }
+
+      if (!liveSensorState) {
+        document.getElementById("sensor-temp").textContent = `${(Number(latest.ambient_temp_c) || 0).toFixed(1)} °C`;
+        document.getElementById("sensor-hum").textContent = `${(Number(latest.relative_humidity_pct) || 0).toFixed(1)} %`;
+        document.getElementById("sensor-flow").textContent = `${(Number(latest.flow_rate_ml_min) || 0).toFixed(1)} mL/min`;
+        const srcBadge = document.getElementById("sensor-source-badge");
+        if (srcBadge) {
+          srcBadge.style.background = "var(--surface-2)";
+          srcBadge.style.borderColor = "var(--border-strong)";
+          srcBadge.style.color = "var(--text-2)";
+          srcBadge.textContent = "LAST CYCLE";
+        }
+      }
+      document.getElementById("sensor-dur-vol").textContent =
+        `${(Number(latest.cycle_duration_sec) || 0).toFixed(1)}s / ${(Number(latest.room_volume_m3) || 1).toFixed(1)} m³`;
+    }
+
+    function renderTable(rows) {
+      const tbody = document.getElementById("table-body");
+      const summaryEl = document.getElementById("pagination-summary");
+      const pageLabelEl = document.getElementById("pagination-page-label");
+      const prevBtn = document.getElementById("btn-page-prev");
+      const nextBtn = document.getElementById("btn-page-next");
+
+      if (!Array.isArray(rows) || rows.length === 0) {
+        currentPage = 1;
+        if (summaryEl) summaryEl.textContent = "Showing 0 of 0 records";
+        if (pageLabelEl) pageLabelEl.textContent = "Page 1 of 1";
+        if (prevBtn) prevBtn.disabled = true;
+        if (nextBtn) nextBtn.disabled = true;
+        tbody.innerHTML = `<tr><td colspan="10" class="px-5 py-8 text-center muted">No matching sanitization records found.</td></tr>`;
+        return;
+      }
+
+      const totalRows = Math.max(rows.length, totalFilteredRecords);
+      const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+      if (currentPage > totalPages) currentPage = totalPages;
+      if (currentPage < 1) currentPage = 1;
+
+      const startIdx = (currentPage - 1) * pageSize;
+      const pageRows = rows;
+
+      if (summaryEl) {
+        summaryEl.textContent = `Showing ${startIdx + 1}–${startIdx + pageRows.length} of ${totalRows}`;
+      }
+      if (pageLabelEl) pageLabelEl.textContent = `Page ${currentPage} of ${totalPages}`;
+      if (prevBtn) prevBtn.disabled = currentPage <= 1;
+      if (nextBtn) nextBtn.disabled = currentPage >= totalPages;
+
+      tbody.innerHTML = pageRows.map((row) => {
+        const rowId = Number(row.id) || 0;
+        const expanded = expandedRecordIds.has(rowId);
+        const rowSei = Number(row.sei_score) || 0;
+        const rowEstop = Boolean(row.estop_triggered) || row.compliance_status === "SAFETY INTERLOCK TRIPPED";
+        const tempVal = Number(row.ambient_temp_c) || 0;
+        const humVal = Number(row.relative_humidity_pct) || 0;
+        const flowVal = Number(row.flow_rate_ml_min) || 0;
+        const durVal = Number(row.cycle_duration_sec) || 0;
+        const volVal = Number(row.room_volume_m3) || 1;
+        const displayTime = escapeHtml(formatManilaTime(row.timestamp));
+        const safeStation = escapeHtml(row.station_id || "MIST-BOH-01");
+        const rawRecordHash = row.record_hash ? String(row.record_hash).trim() : "";
+        const rawPrevHash = row.prev_hash ? String(row.prev_hash).trim() : "";
+        const shortHash = formatTruncatedHash(rawRecordHash);
+        const seiColor = rowEstop || rowSei < 1.8 ? "var(--fail)" : (rowSei < 2.8 ? "var(--marginal)" : "var(--pass)");
+        const complianceLabel = escapeHtml(
+          row.compliance_status || (rowEstop ? "SAFETY INTERLOCK TRIPPED" : rowSei >= 2.8 ? "AUDIT VERIFIED" : "REQUIRES ATTENTION")
+        );
+
+        const mainRow = `
+          <tr class="row-hover cursor-pointer transition" data-toggle-row="${rowId}">
+            <td class="px-4 py-2.5 mono muted">#${escapeHtml(rowId)}</td>
+            <td class="px-4 py-2.5 mono">${displayTime}</td>
+            <td class="px-4 py-2.5 font-semibold">${safeStation}</td>
+            <td class="px-4 py-2.5 mono">${tempVal.toFixed(1)}°C / ${humVal.toFixed(1)}%</td>
+            <td class="px-4 py-2.5 mono">${flowVal.toFixed(1)} mL/min</td>
+            <td class="px-4 py-2.5 mono">${durVal.toFixed(1)}s / ${volVal.toFixed(1)}m³</td>
+            <td class="px-4 py-2.5 mono font-bold" style="color: ${seiColor};">${rowSei.toFixed(3)}</td>
+            <td class="px-4 py-2.5">${getBadge(row)}</td>
+            <td class="px-4 py-2.5 font-semibold" style="color: ${rowEstop ? "var(--estop)" : "var(--pass)"};">
+              ${rowEstop ? "E-Stop Active" : "Normal Delivery"}
+            </td>
+            <td class="px-4 py-2.5">
+              <span class="mono px-2 py-0.5 rounded subpanel" style="color: var(--sei);">${escapeHtml(shortHash)}</span>
+            </td>
+          </tr>
+        `;
+
+        if (!expanded) return mainRow;
+
+        return mainRow + `
+          <tr style="background: var(--surface-2);">
+            <td colspan="10" class="px-5 py-3">
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-[11px]">
+                <div>
+                  <span class="muted uppercase">Compliance Status:</span>
+                  <span class="mono font-semibold ml-1">${complianceLabel}</span>
+                </div>
+                <div class="flex items-center justify-between gap-2 min-w-0">
+                  <div class="truncate">
+                    <span class="muted uppercase">Record SHA-256:</span>
+                    <code class="mono ml-1" style="color: var(--sei);">${escapeHtml(rawRecordHash || "--")}</code>
+                  </div>
+                  ${rawRecordHash ? `<button type="button" class="btn-ghost px-2 py-0.5 text-[10px] mono shrink-0" data-copy-hash="${escapeHtml(rawRecordHash)}">Copy</button>` : ""}
+                </div>
+                <div class="flex items-center justify-between gap-2 min-w-0">
+                  <div class="truncate">
+                    <span class="muted uppercase">Prev SHA-256:</span>
+                    <code class="mono ml-1 secondary-text">${escapeHtml(rawPrevHash || "--")}</code>
+                  </div>
+                  ${rawPrevHash ? `<button type="button" class="btn-ghost px-2 py-0.5 text-[10px] mono shrink-0" data-copy-hash="${escapeHtml(rawPrevHash)}">Copy</button>` : ""}
+                </div>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join("");
+
+      tbody.querySelectorAll("[data-toggle-row]").forEach((tr) => {
+        tr.addEventListener("click", () => {
+          const id = Number(tr.dataset.toggleRow);
+          if (expandedRecordIds.has(id)) expandedRecordIds.delete(id);
+          else expandedRecordIds.add(id);
+          renderTable(currentRecords);
+        });
+      });
+
+      tbody.querySelectorAll("[data-copy-hash]").forEach((btn) => {
+        btn.addEventListener("click", async (event) => {
+          event.stopPropagation();
+          const hashValue = btn.dataset.copyHash || "";
+          if (!hashValue) return;
+          let copied = false;
+          if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+            try {
+              await navigator.clipboard.writeText(hashValue);
+              copied = true;
+            } catch {
+              copied = false;
+            }
+          }
+          if (!copied) {
+            const ta = document.createElement("textarea");
+            ta.value = hashValue;
+            ta.setAttribute("readonly", "");
+            ta.style.position = "fixed";
+            ta.style.opacity = "0";
+            document.body.appendChild(ta);
+            ta.select();
+            try {
+              copied = document.execCommand("copy");
+            } catch {
+              copied = false;
+            }
+            document.body.removeChild(ta);
+          }
+          btn.textContent = copied ? "Copied!" : "Failed";
+          setTimeout(() => {
+            btn.textContent = "Copy";
+          }, 1400);
+        });
+      });
+    }
+
+    function openConfirmModal() {
+      const duration = parseInt(document.getElementById("input-duration").value, 10);
+      const volume = parseFloat(document.getElementById("input-volume").value);
+      if (!Number.isInteger(duration) || duration < 5 || duration > 300) return;
+      if (!Number.isFinite(volume) || volume < 0.1 || volume > 200) return;
+
+      const estSei = estimateSei(duration, volume, liveSensorState);
+      const suggestion = suggestedDuration(volume, liveSensorState);
+
+      document.getElementById("confirm-duration-val").textContent = `${duration} seconds`;
+      document.getElementById("confirm-volume-val").textContent = `${volume.toFixed(1)} m³`;
+      const estEl = document.getElementById("confirm-estimate-val");
+      estEl.textContent = `${estSei.toFixed(3)} SEI ${estSei >= 2.8 ? "(Target ≥ 2.800)" : "(Below 2.800)"}`;
+      estEl.style.color = estSei >= 2.8 ? "var(--pass)" : "var(--marginal)";
+
+      const warnBox = document.getElementById("confirm-low-warning");
+      const useTargetBtn = document.getElementById("btn-confirm-use-target");
+      if (estSei < 2.8) {
+        warnBox.classList.remove("hidden");
+        if (suggestion !== null) {
+          const sugSei = estimateSei(suggestion, volume, liveSensorState);
+          useTargetBtn.classList.remove("hidden");
+          useTargetBtn.textContent = `Use ${suggestion}s (Est. ${sugSei.toFixed(3)} SEI)`;
+          useTargetBtn.onclick = () => {
+            document.getElementById("input-duration").value = String(suggestion);
+            updateSeiEstimatePreview();
+            openConfirmModal();
+          };
+        } else {
+          useTargetBtn.classList.add("hidden");
+        }
+      } else {
+        warnBox.classList.add("hidden");
+      }
+
+      const checkbox = document.getElementById("confirm-area-clear");
+      checkbox.checked = false;
+      document.getElementById("btn-confirm-dispatch").disabled = true;
+      document.getElementById("confirm-modal").classList.remove("hidden");
+      checkbox.focus();
+    }
+
+    function closeConfirmModal(force = false) {
+      if (isDispatching && !force) return;
+      document.getElementById("confirm-modal").classList.add("hidden");
+    }
+
+    function clearCycleMonitor() {
+      if (countdownTimer) {
+        clearInterval(countdownTimer);
+        countdownTimer = null;
+      }
+      activeCycle = null;
+      document.getElementById("cycle-progress-panel").classList.add("hidden");
+      document.getElementById("cycle-overdue-controls").classList.add("hidden");
+    }
+
+    function startCycleCountdown(durationSec, volume, baselineId) {
+      if (countdownTimer) clearInterval(countdownTimer);
+
+      const panel = document.getElementById("cycle-progress-panel");
+      const phaseLabel = document.getElementById("cycle-phase-label");
+      const countdownEl = document.getElementById("cycle-countdown");
+      const progressBar = document.getElementById("cycle-progress-bar");
+      const overdueEl = document.getElementById("cycle-overdue-controls");
+
+      const preWarningMs = 1000;
+      const totalMs = preWarningMs + durationSec * 1000;
+      const startedAt = Date.now();
+      activeCycle = { durationSec, volume, baselineId, startedAt };
+
+      panel.classList.remove("hidden");
+      overdueEl.classList.add("hidden");
+      progressBar.style.width = "0%";
+
+      countdownTimer = setInterval(() => {
+        const elapsed = Date.now() - startedAt;
+        const pct = Math.min(100, (elapsed / totalMs) * 100);
+        const remainingSec = Math.max(0, (totalMs - elapsed) / 1000);
+        progressBar.style.width = `${pct.toFixed(1)}%`;
+
+        if (elapsed < preWarningMs) {
+          phaseLabel.style.color = "var(--marginal)";
+          phaseLabel.textContent = "Pre-Cycle Warning Tone (1s)";
+          countdownEl.textContent = `${remainingSec.toFixed(1)}s left`;
+        } else if (elapsed < totalMs) {
+          phaseLabel.style.color = "var(--pass)";
+          phaseLabel.textContent = "Atomizer Misting Active";
+          countdownEl.textContent = `${remainingSec.toFixed(1)}s left`;
+        } else {
+          phaseLabel.style.color = "var(--focus)";
+          phaseLabel.textContent = "Misting Complete — Awaiting Station Record";
+          countdownEl.textContent = "100%";
+          if (elapsed > totalMs + 8000) {
+            overdueEl.classList.remove("hidden");
+          }
+        }
+      }, 250);
+    }
+
+    function checkDispatchedCycleCompletion(newestRow) {
+      if (!activeCycle || !newestRow) return;
+      if (Number(newestRow.id) === Number(activeCycle.baselineId)) return;
+      let tsIso = String(newestRow.timestamp || "");
+      if (tsIso && !tsIso.endsWith("Z") && !tsIso.includes("+")) tsIso += "Z";
+      const recMs = new Date(tsIso).getTime();
+      if (!Number.isNaN(recMs) && recMs < activeCycle.startedAt - 15000) return;
+
+      clearCycleMonitor();
       const feedback = document.getElementById("trigger-feedback");
-      const btn = document.getElementById("btn-remote-start");
-
-      if (isNaN(duration) || duration < 5) {
-        alert("Please set a cycle duration of at least 5 seconds.");
-        return;
+      if (feedback) {
+        feedback.classList.remove("hidden");
+        feedback.style.color = "var(--pass)";
+        feedback.textContent = `[RECORDED] Cycle #${newestRow.id} committed (SEI ${Number(newestRow.sei_score).toFixed(3)} · ${newestRow.efficacy_label}).`;
       }
-      if (isNaN(volume) || volume <= 0) {
-        alert("Please provide a valid room volume greater than 0 m³.");
-        return;
-      }
+    }
 
-      btn.disabled = true;
-      btn.classList.add("opacity-50", "cursor-not-allowed");
-      feedback.className = "text-xs mt-3 font-mono text-blue-400 block";
-      feedback.textContent = `[TRANSMITTING] Dispatched trigger command (${duration}s misting @ ${volume} m³)...`;
+    async function dispatchConfirmedCycle() {
+      const duration = parseInt(document.getElementById("input-duration").value, 10);
+      const volume = parseFloat(document.getElementById("input-volume").value);
+      const feedback = document.getElementById("trigger-feedback");
+      const dispatchBtn = document.getElementById("btn-confirm-dispatch");
+
+      if (!document.getElementById("confirm-area-clear").checked || isDispatching) return;
+
+      isDispatching = true;
+      dispatchBtn.disabled = true;
+      dispatchBtn.textContent = "Dispatching…";
+      document.getElementById("btn-open-confirm").disabled = true;
+
+      feedback.classList.remove("hidden");
+      feedback.style.color = "var(--focus)";
+      feedback.textContent = `[TRANSMITTING] Dispatching MQTT START (${duration}s @ ${volume.toFixed(1)} m³)…`;
 
       try {
-        const res = await fetch(TRIGGER_URL, {
+        const res = await authFetch("/api/v1/trigger", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ duration_sec: duration, room_volume_m3: volume })
+          body: JSON.stringify({ duration_sec: duration, room_volume_m3: volume }),
         });
 
-        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-        feedback.className = "text-xs mt-3 font-mono text-emerald-400 block";
-        feedback.textContent = `[DISPATCH ACKNOWLEDGED] Command published to MQTT broker. Station executing pre-warning and cycle...`;
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({}));
+          throw new Error(errBody.detail || `HTTP ${res.status}: ${res.statusText}`);
+        }
+
+        const result = await res.json();
+        isDispatching = false;
+        closeConfirmModal(true);
+        feedback.style.color = "var(--pass)";
+        feedback.textContent = `[DISPATCHED] Command sent by ${result.triggered_by}. Executing pre-warning & misting…`;
+        startCycleCountdown(duration, volume, latestRecord?.id ?? 0);
       } catch (err) {
-        feedback.className = "text-xs mt-3 font-mono text-rose-400 block";
-        feedback.textContent = "Failed to dispatch command: " + err.message;
+        isDispatching = false;
+        closeConfirmModal(true);
+        if (err.message !== "Unauthorized" && err.message !== "Unauthenticated") {
+          feedback.style.color = "var(--fail)";
+          feedback.textContent = `Dispatch failed: ${err.message}`;
+        }
       } finally {
-        setTimeout(() => {
-          btn.disabled = false;
-          btn.classList.remove("opacity-50", "cursor-not-allowed");
-        }, 2000);
+        dispatchBtn.textContent = "Start Cycle";
+        document.getElementById("btn-open-confirm").disabled = false;
+        updateSeiEstimatePreview();
       }
     }
 
-    async function fetchRecords() {
+    async function verifyLedgerChain() {
+      const btn = document.getElementById("verify-ledger-btn");
+      const banner = document.getElementById("ledger-verify-banner");
+      if (!btn || !banner) return;
+
+      btn.disabled = true;
+      const originalText = btn.textContent;
+      btn.textContent = "Verifying…";
+
       try {
-        const res = await fetch(API_URL);
-        if (!res.ok) throw new Error("Backend offline");
-        const data = await res.json();
-
-        const tbody = document.getElementById("table-body");
-        document.getElementById("stat-cycles").textContent = data.length;
-        document.getElementById("last-updated").textContent = `Last polled: ${new Date().toLocaleTimeString()}`;
-
-        if (!Array.isArray(data) || data.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="9" class="px-6 py-8 text-center text-slate-500">No sanitization cycles recorded yet. Trigger a cycle via dashboard or Wokwi!</td></tr>`;
-          return;
+        const res = await authFetch("/api/v1/ledger/verify");
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({}));
+          throw new Error(errBody.detail || `HTTP ${res.status}: ${res.statusText}`);
         }
 
-        const latest = data[0];
-        const latestSei = Number(latest.sei_score) || 0;
-        const isEstop = Boolean(latest.estop_triggered) || latest.compliance_status === "SAFETY INTERLOCK TRIPPED";
-        const isPass = latestSei >= 2.800 || Number(latest.predicted_class) === 2 || (latest.efficacy_label || "").toLowerCase() === "pass";
+        const result = await res.json();
+        const isVerified = result.verified === true;
+        const checkedRecords = Number(result.checked_records) || 0;
+        const latestHash = String(result.latest_hash ?? "").trim();
+        const shortLatestHash = formatTruncatedHash(latestHash);
+        const tampered = Array.isArray(result.tampered_ids)
+          ? result.tampered_ids
+          : Array.isArray(result.corrupted_ids)
+            ? result.corrupted_ids
+            : [];
 
-        document.getElementById("stat-station").textContent = latest.station_id || "MIST-BOH-01";
-        document.getElementById("stat-sei").textContent = latestSei.toFixed(3);
-        
-        const effElement = document.getElementById("stat-efficacy");
-        const compElement = document.getElementById("stat-compliance");
+        updateLedgerIntegrityBadge(isVerified, latestHash);
 
-        if (isEstop) {
-          effElement.textContent = "Fail";
-          effElement.className = "text-xl font-bold mt-1 text-rose-500";
-          compElement.textContent = "Status: SAFETY INTERLOCK TRIPPED";
-          compElement.className = "text-xs text-rose-400";
-        } else if (isPass) {
-          effElement.textContent = "Pass";
-          effElement.className = "text-xl font-bold mt-1 text-emerald-400";
-          compElement.textContent = "Status: AUDIT VERIFIED";
-          compElement.className = "text-xs text-emerald-400";
-        } else {
-          effElement.textContent = latest.efficacy_label || "Fail";
-          effElement.className = "text-xl font-bold mt-1 text-amber-400";
-          compElement.textContent = "Status: REQUIRES ATTENTION";
-          compElement.className = "text-xs text-amber-400";
-        }
-
-        tbody.innerHTML = data.map(row => {
-          const rowSei = Number(row.sei_score) || 0;
-          const rowEstop = Boolean(row.estop_triggered) || row.compliance_status === "SAFETY INTERLOCK TRIPPED";
-          const tempVal = Number(row.ambient_temp_c) || 0;
-          const humVal = Number(row.relative_humidity_pct) || 0;
-          const flowVal = Number(row.flow_rate_ml_min) || 0;
-          const durVal = Number(row.cycle_duration_sec) || 0;
-
-          let displayTime = "--:--:--";
-          if (row.timestamp) {
-            let isoStr = row.timestamp;
-             if (!isoStr.endsWith("Z") && !isoStr.includes("+")) {
-              isoStr += "Z";
-            }
-  const dateObj = new Date(isoStr);
-  displayTime = isNaN(dateObj.getTime())
-    ? row.timestamp
-    : dateObj.toLocaleTimeString("en-US", {
-        timeZone: "Asia/Manila",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hour12: true
-      });
-}
-
-          return `
-            <tr class="hover:bg-slate-800/40 transition">
-              <td class="px-6 py-3 font-mono text-xs text-slate-400">#${row.id}</td>
-              <td class="px-6 py-3 font-mono text-xs text-slate-300">${displayTime}</td>
-              <td class="px-6 py-3 font-medium text-white">${row.station_id || 'MIST-BOH-01'}</td>
-              <td class="px-6 py-3 font-mono text-xs text-slate-300">${tempVal.toFixed(1)}°C / ${humVal.toFixed(0)}%</td>
-              <td class="px-6 py-3 font-mono text-xs text-slate-300">${flowVal.toFixed(1)} mL/min</td>
-              <td class="px-6 py-3 font-mono text-xs text-slate-300">${durVal}s</td>
-              <td class="px-6 py-3 font-mono text-xs font-semibold ${rowSei >= 2.800 ? 'text-indigo-400' : 'text-slate-400'}">${rowSei.toFixed(3)}</td>
-              <td class="px-6 py-3">${getBadge(row)}</td>
-              <td class="px-6 py-3 text-xs">
-                ${rowEstop 
-                  ? '<span class="text-rose-400 font-semibold">E-Stop Active</span>' 
-                  : '<span class="text-emerald-400">Normal Delivery</span>'}
-              </td>
-            </tr>
+        if (isVerified) {
+          banner.dataset.state = "verified";
+          banner.style.background = "var(--pass-soft)";
+          banner.style.color = "var(--text)";
+          banner.className = "px-5 py-2.5 border-b text-xs flex flex-wrap items-center justify-between gap-3";
+          banner.innerHTML = `
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
+              <span class="font-bold" style="color: var(--pass);">SHA-256 Chain Verified</span>
+              <span>Checked Records: <strong class="mono">${escapeHtml(checkedRecords)}</strong></span>
+              <span>Latest Hash: <code class="mono px-1.5 py-0.5 rounded subpanel">${escapeHtml(shortLatestHash)}</code></span>
+            </div>
+            <button type="button" onclick="dismissLedgerBanner()" class="btn-ghost px-2.5 py-1 text-[11px]">Dismiss</button>
           `;
-        }).join("");
-
+        } else {
+          banner.dataset.state = "tampered";
+          const formattedIds = tampered.length > 0 ? tampered.map((id) => `#${escapeHtml(id)}`).join(", ") : "Unknown";
+          banner.style.background = "var(--fail-soft)";
+          banner.style.color = "var(--text)";
+          banner.className = "px-5 py-2.5 border-b text-xs flex flex-wrap items-center justify-between gap-3";
+          banner.innerHTML = `
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
+              <span class="font-bold" style="color: var(--fail);">Tamper Alert!</span>
+              <span>Checked Records: <strong class="mono">${escapeHtml(checkedRecords)}</strong></span>
+              <span>Tampered IDs: <strong class="mono" style="color: var(--fail);">${formattedIds}</strong></span>
+            </div>
+            <button type="button" onclick="dismissLedgerBanner()" class="btn-ghost px-2.5 py-1 text-[11px]">Dismiss</button>
+          `;
+        }
       } catch (err) {
-        document.getElementById("last-updated").textContent = "Backend unreachable (retrying...)";
+        if (err.message !== "Unauthorized" && err.message !== "Unauthenticated") {
+          banner.dataset.state = "error";
+          banner.style.background = "var(--fail-soft)";
+          banner.style.color = "var(--fail)";
+          banner.className = "px-5 py-2.5 border-b text-xs flex flex-wrap items-center justify-between gap-3";
+          banner.innerHTML = `
+            <span><strong>Verification Error:</strong> ${escapeHtml(err.message)}</span>
+            <button type="button" onclick="dismissLedgerBanner()" class="btn-ghost px-2.5 py-1 text-[11px]">Dismiss</button>
+          `;
+        }
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
       }
     }
 
-    document.getElementById("refresh-btn").addEventListener("click", fetchRecords);
-    fetchRecords();
-    setInterval(fetchRecords, 3000);
+    function setActiveStatusFilter(nextFilter) {
+      activeStatusFilter = nextFilter;
+      document.querySelectorAll(".filter-pill").forEach((pill) => {
+        pill.setAttribute("aria-pressed", pill.dataset.status === nextFilter ? "true" : "false");
+      });
+      document.querySelectorAll("[data-kpi-filter]").forEach((btn) => {
+        const key = btn.dataset.kpiFilter;
+        btn.setAttribute("aria-pressed", key === nextFilter ? "true" : "false");
+      });
+    }
+
+    async function refreshDashboard(isPageRetry = false) {
+      if (!getToken()) return;
+      const errBanner = document.getElementById("service-error-banner");
+
+      try {
+        const searchVal = document.getElementById("search-input").value.trim();
+        const offset = Math.max(0, (currentPage - 1) * pageSize);
+        const params = new URLSearchParams({
+          limit: String(pageSize),
+          offset: String(offset),
+        });
+        if (activeStatusFilter !== "all") params.set("status", activeStatusFilter);
+        if (searchVal) params.set("search", searchVal);
+
+        const [statsRes, latestRes, filteredRes] = await Promise.all([
+          authFetch("/api/v1/stats"),
+          authFetch("/api/v1/records?limit=1"),
+          authFetch(`/api/v1/records?${params.toString()}`),
+        ]);
+
+        if (!statsRes.ok || !latestRes.ok || !filteredRes.ok) {
+          throw new Error("Backend request failed");
+        }
+
+        const stats = await statsRes.json();
+        const latestRows = await latestRes.json();
+        const filteredRows = await filteredRes.json();
+        currentRecords = Array.isArray(filteredRows) ? filteredRows : [];
+
+        const rawFiltered = filteredRes.headers.get("X-Filtered-Count") ?? filteredRes.headers.get("X-Total-Count");
+        const parsedCount = rawFiltered !== null ? parseInt(rawFiltered, 10) : NaN;
+        totalFilteredRecords = Number.isFinite(parsedCount) && parsedCount >= 0
+          ? parsedCount
+          : (offset + currentRecords.length);
+
+        if (currentRecords.length === 0 && totalFilteredRecords > 0 && currentPage > 1 && isPageRetry !== true) {
+          currentPage = Math.max(1, Math.ceil(totalFilteredRecords / pageSize));
+          return refreshDashboard(true);
+        }
+
+        lastReceivedAt = Date.now();
+        errBanner?.classList.add("hidden");
+
+        document.getElementById("stat-cycles").textContent = Number(stats.total_cycles) || 0;
+        document.getElementById("stat-pass-rate").textContent = `${(Number(stats.pass_rate_pct) || 0).toFixed(1)}%`;
+        document.getElementById("count-pass").textContent = Number(stats.pass_count) || 0;
+        document.getElementById("count-marginal").textContent = Number(stats.marginal_count) || 0;
+        document.getElementById("count-fail").textContent = Number(stats.fail_count) || 0;
+        document.getElementById("count-estop").textContent = Number(stats.estop_count) || 0;
+
+        updateLedgerIntegrityBadge(stats.ledger_verified, stats.latest_hash);
+        updateConnectionPanel(stats, true);
+
+        const banner = document.getElementById("ledger-verify-banner");
+        if (stats.ledger_verified === false && banner && banner.dataset.state === "verified") {
+          banner.dataset.state = "tampered";
+          banner.style.background = "var(--fail-soft)";
+          banner.style.color = "var(--text)";
+          banner.className = "px-5 py-2.5 border-b text-xs flex flex-wrap items-center justify-between gap-3";
+          banner.innerHTML = `
+            <div>
+              <strong style="color: var(--fail);">Tamper Alert!</strong>
+              <span class="ml-2">Hash chain mismatch detected during refresh. Click <strong>Verify Ledger Chain</strong> to inspect affected records.</span>
+            </div>
+            <button type="button" onclick="dismissLedgerBanner()" class="btn-ghost px-2.5 py-1 text-[11px]">Dismiss</button>
+          `;
+        }
+
+        if (stats.live_telemetry) {
+          updateLiveSensorStrip(stats.live_telemetry);
+        }
+
+        if (Array.isArray(latestRows) && latestRows.length > 0) {
+          latestRecord = latestRows[0];
+          updateSummaryCards(latestRecord);
+          checkDispatchedCycleCompletion(latestRecord);
+        }
+
+        renderTable(currentRecords);
+      } catch (err) {
+        if (err.message !== "Unauthorized" && err.message !== "Unauthenticated") {
+          updateConnectionPanel(null, false);
+          if (errBanner) {
+            document.getElementById("service-error-text").textContent = `Service connection issue (${err.message}). Retrying automatically…`;
+            errBanner.classList.remove("hidden");
+          }
+        }
+      }
+    }
+
+    async function exportCsv() {
+      let rowsToExport = [];
+      try {
+        const searchVal = document.getElementById("search-input").value.trim();
+        const batchSize = 500;
+        let offset = 0;
+        let expectedTotal = Infinity;
+
+        while (offset < expectedTotal) {
+          const params = new URLSearchParams({
+            limit: String(batchSize),
+            offset: String(offset),
+          });
+          if (activeStatusFilter !== "all") params.set("status", activeStatusFilter);
+          if (searchVal) params.set("search", searchVal);
+
+          const res = await authFetch(`/api/v1/records?${params.toString()}`);
+          if (!res.ok) break;
+
+          const headerTotal = res.headers.get("X-Filtered-Count") ?? res.headers.get("X-Total-Count");
+          const parsedTotal = headerTotal !== null ? parseInt(headerTotal, 10) : NaN;
+          if (Number.isFinite(parsedTotal) && parsedTotal >= 0) {
+            expectedTotal = parsedTotal;
+          }
+
+          const batch = await res.json();
+          if (!Array.isArray(batch) || batch.length === 0) break;
+          rowsToExport.push(...batch);
+          offset += batch.length;
+          if (batch.length < batchSize) break;
+        }
+      } catch {
+        rowsToExport = [];
+      }
+
+      if (!rowsToExport.length && currentRecords.length) {
+        rowsToExport = currentRecords;
+      }
+
+      if (!rowsToExport.length) {
+        alert("No audit records to export.");
+        return;
+      }
+
+      const headers = [
+        "id",
+        "timestamp",
+        "station_id",
+        "ambient_temp_c",
+        "relative_humidity_pct",
+        "flow_rate_ml_min",
+        "cycle_duration_sec",
+        "room_volume_m3",
+        "sei_score",
+        "efficacy_label",
+        "ml_confidence",
+        "compliance_status",
+        "delivery_confirmed",
+        "estop_triggered",
+        "prev_hash",
+        "record_hash",
+      ];
+
+      const escapeCsvCell = (val) => `"${String(val ?? "").replace(/"/g, '""')}"`;
+      const lines = [
+        headers.join(","),
+        ...rowsToExport.map((row) => headers.map((col) => escapeCsvCell(row[col])).join(",")),
+      ];
+
+      const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `sanmist_audit_ledger_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }
+
+    async function handleLoginSubmit(event) {
+      event.preventDefault();
+      const username = document.getElementById("login-username").value.trim();
+      const password = document.getElementById("login-password").value;
+      const errBox = document.getElementById("login-error");
+      const btn = document.getElementById("login-submit-btn");
+
+      errBox.classList.add("hidden");
+      btn.disabled = true;
+      btn.textContent = "Signing in…";
+
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, password }),
+        });
+
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(body.detail || "Invalid credentials");
+        }
+
+        setToken(body.access_token);
+        showDashboard(body.user);
+        await refreshDashboard();
+        startPolling();
+      } catch (err) {
+        errBox.textContent = err.message === "Failed to fetch"
+          ? `Cannot reach MistSan API at ${API_BASE}. Is uvicorn running?`
+          : err.message;
+        errBox.classList.remove("hidden");
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Sign In to Command Center";
+      }
+    }
+
+    async function handleLogout() {
+      const token = getToken();
+      if (token) {
+        fetch(`${API_BASE}/api/v1/auth/logout`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        }).catch(() => {});
+      }
+      clearToken();
+      showLoginOverlay("");
+    }
+
+    async function bootstrapSession() {
+      const token = getToken();
+      if (!token) {
+        showLoginOverlay("");
+        return;
+      }
+
+      try {
+        const res = await authFetch("/api/v1/auth/me");
+        if (!res.ok) throw new Error("Session invalid");
+        const user = await res.json();
+        showDashboard(user);
+        await refreshDashboard();
+        startPolling();
+      } catch {
+        clearToken();
+        showLoginOverlay("");
+      }
+    }
+
+    // Event bindings
+    initTheme();
+    document.querySelectorAll("[data-theme-btn]").forEach((btn) => {
+      btn.addEventListener("click", () => applyTheme(btn.dataset.themeBtn));
+    });
+
+    document.getElementById("toggle-login-password").addEventListener("click", (event) => {
+      const input = document.getElementById("login-password");
+      const isHidden = input.type === "password";
+      input.type = isHidden ? "text" : "password";
+      event.currentTarget.textContent = isHidden ? "Hide" : "Show";
+    });
+
+    document.getElementById("login-form").addEventListener("submit", handleLoginSubmit);
+    document.getElementById("refresh-btn").addEventListener("click", refreshDashboard);
+    document.getElementById("btn-retry-fetch").addEventListener("click", refreshDashboard);
+    document.getElementById("logout-btn").addEventListener("click", handleLogout);
+    document.getElementById("verify-ledger-btn").addEventListener("click", verifyLedgerChain);
+    document.getElementById("export-csv-btn").addEventListener("click", exportCsv);
+
+    document.getElementById("btn-dur-minus").addEventListener("click", () => {
+      const el = document.getElementById("input-duration");
+      const cur = parseInt(el.value, 10);
+      const next = Math.max(5, Math.min(300, (Number.isFinite(cur) ? cur : 32) - 5));
+      el.value = String(next);
+      updateSeiEstimatePreview();
+    });
+
+    document.getElementById("btn-dur-plus").addEventListener("click", () => {
+      const el = document.getElementById("input-duration");
+      const cur = parseInt(el.value, 10);
+      const next = Math.max(5, Math.min(300, (Number.isFinite(cur) ? cur : 32) + 5));
+      el.value = String(next);
+      updateSeiEstimatePreview();
+    });
+
+    document.getElementById("input-duration").addEventListener("input", updateSeiEstimatePreview);
+    document.getElementById("input-duration").addEventListener("change", updateSeiEstimatePreview);
+    document.getElementById("input-volume").addEventListener("input", updateSeiEstimatePreview);
+    document.getElementById("input-volume").addEventListener("change", updateSeiEstimatePreview);
+
+    document.getElementById("btn-open-confirm").addEventListener("click", openConfirmModal);
+    document.getElementById("btn-confirm-cancel").addEventListener("click", () => closeConfirmModal(false));
+    document.getElementById("btn-confirm-dispatch").addEventListener("click", dispatchConfirmedCycle);
+    document.getElementById("confirm-area-clear").addEventListener("change", (event) => {
+      document.getElementById("btn-confirm-dispatch").disabled = !event.target.checked || isDispatching;
+    });
+    document.getElementById("confirm-modal").addEventListener("click", (event) => {
+      if (event.target.id === "confirm-modal") closeConfirmModal(false);
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !document.getElementById("confirm-modal").classList.contains("hidden")) {
+        closeConfirmModal(false);
+      }
+    });
+
+    document.getElementById("btn-cycle-check").addEventListener("click", refreshDashboard);
+    document.getElementById("btn-cycle-reset").addEventListener("click", clearCycleMonitor);
+
+    let searchDebounce = null;
+    document.getElementById("search-input").addEventListener("input", () => {
+      clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(() => {
+        currentPage = 1;
+        refreshDashboard();
+      }, 200);
+    });
+
+    document.querySelectorAll(".filter-pill").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        currentPage = 1;
+        setActiveStatusFilter(btn.dataset.status);
+        refreshDashboard();
+      });
+    });
+
+    document.querySelectorAll("[data-kpi-filter]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        currentPage = 1;
+        const target = btn.dataset.kpiFilter;
+        const next = target !== "all" && activeStatusFilter === target ? "all" : target;
+        setActiveStatusFilter(next);
+        refreshDashboard();
+      });
+    });
+
+    document.getElementById("page-size-select").addEventListener("change", (e) => {
+      const nextSize = parseInt(e.target.value, 10);
+      if (Number.isFinite(nextSize) && nextSize > 0) {
+        pageSize = nextSize;
+        currentPage = 1;
+        refreshDashboard();
+      }
+    });
+
+    document.getElementById("btn-page-prev").addEventListener("click", () => {
+      if (currentPage > 1) {
+        currentPage -= 1;
+        refreshDashboard();
+      }
+    });
+
+    document.getElementById("btn-page-next").addEventListener("click", () => {
+      const totalPages = Math.max(1, Math.ceil(totalFilteredRecords / pageSize));
+      if (currentPage < totalPages) {
+        currentPage += 1;
+        refreshDashboard();
+      }
+    });
+
+    updateSeiEstimatePreview();
+    bootstrapSession();
   </script>
 </body>
+
 </html>

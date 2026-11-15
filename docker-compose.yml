@@ -1,0 +1,47 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: sanmist-mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/config:/mosquitto/config:ro
+      - mosquitto_data:/mosquitto/data
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sanmist-backend
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+    ports:
+      - "8000:8000"
+    environment:
+      SANMIST_MQTT_BROKER: mosquitto
+      SANMIST_MQTT_PORT: "1883"
+      SANMIST_MQTT_USERNAME: ""
+      SANMIST_MQTT_PASSWORD: ""
+      SANMIST_DEVICE_KEY: sanmist-edge-key-2026
+      SANMIST_MQTT_REQUIRE_AUTH: "1"
+    volumes:
+      - sanmist_db:/app/backend/app
+    command: ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sanmist-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+    command: ["python", "-u", "-m", "http.server", "3000", "--directory", "frontend"]
+
+volumes:
+  mosquitto_data:
+  sanmist_db:
