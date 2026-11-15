@@ -15,5 +15,3 @@ frontend/dist/
 .env
 .DS_Store
 Thumbs.db
-PROJECT_EVALUATION.md
-BUG_REPORT.md

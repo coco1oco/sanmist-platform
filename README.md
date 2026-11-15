@@ -63,12 +63,12 @@ flowchart LR
 
 ## Key Features
 
-- **Automated Edge Sanitization Control:** ESP32-driven misting sequence with 1-second pre-cycle buzzer warning, real-time flow-rate sampling (potentiometer proxy for a YF-S401 flow sensor), DHT22 ambient temperature/humidity sensing, isolated manual cycle defaults, mid-cycle remote-trigger locking, and a hardware-interrupt Emergency Stop (`E-STOP`) safety interlock.
+- **Automated Edge Sanitization Control:** ESP32-driven misting sequence with 1-second pre-cycle buzzer warning (`tone()` at 2 kHz), real-time flow-rate sampling (potentiometer proxy for a YF-S401 flow sensor), DHT22 ambient temperature/humidity sensing, live status heartbeat publishing (`sanmist/devices/MIST-BOH-01/status`), isolated manual cycle defaults, mid-cycle remote-trigger locking, and a hardware-interrupt Emergency Stop (`E-STOP`) safety interlock.
 - **Evaporation-Adjusted SEI & ML Grading:** Evaluates each cycle across five physical parameters (`ambient_temp_c`, `relative_humidity_pct`, `flow_rate_ml_min`, `cycle_duration_sec`, `room_volume_m3`) and classifies efficacy into **Fail (`0`)**, **Marginal (`1`)**, or **Pass (`2`)** using the native XGBoost JSON model (`xgboost_sei_classifier.json`) with PD 856 threshold enforcement (`SEI >= 2.800`).
-- **Dual Ingestion Modes & Deduplication:** Accepts device telemetry asynchronously via MQTT (`sanmist/devices/+/telemetry`, with a 3-second deduplication window) as well as synchronously over HTTP (`POST /api/v1/telemetry/evaluate`).
+- **Dual Ingestion Modes, Deduplication & Payload Auth:** Accepts device telemetry asynchronously via MQTT (`sanmist/devices/+/telemetry`, with a 3-second deduplication window) and live sensor heartbeats (`sanmist/devices/+/status`), as well as synchronously over HTTP (`POST /api/v1/telemetry/evaluate`). Supports shared `auth_key` and HMAC-SHA256 `signature` verification across MQTT control and telemetry payloads.
 - **Bearer-Token Authentication:** Protects operational endpoints (`/api/v1/records`, `/api/v1/stats`, `/api/v1/ledger/verify`, `/api/v1/trigger`, `/api/v1/auth/me`, `/api/v1/auth/logout`) using PBKDF2-SHA256 salted password hashes and timed session tokens persisted in SQLite (`users` and `auth_sessions`).
 - **Tamper-Evident SHA-256 Audit Ledger:** Every row in `cycle_records` is cryptographically linked to its predecessor (`prev_hash`, starting from genesis `"0" * 64`) and sealed with a deterministic SHA-256 `record_hash` over canonical cycle fields, verifiable on demand via `GET /api/v1/ledger/verify`.
-- **Command Center Dashboard UI:** Dark-mode compliance console with Login Overlay & demo quick-fill buttons, Live Sensor Telemetry Strip, Visual SEI Gauge, Remote Station Trigger with Live Estimated SEI Preview & active cycle countdown bar, Search & Status Filter Pills, SHA-256 Ledger Integrity Badge & Verify Action, `Chain Hash` table column, and CSV export.
+- **Command Center Dashboard UI:** Industrial compliance console with Dark/Light theme switcher, Login Overlay & demo quick-fill buttons, Live Sensor Telemetry Strip, Visual SEI Gauge, Remote Station Trigger with Live Evaporation-Adjusted SEI Preview, Pre-Dispatch Safety Confirmation Modal & active cycle countdown bar, Server-Side Pagination, Search & Status Filter Pills, SHA-256 Ledger Integrity Badge & Verify Action, expandable SHA-256 row inspector, and full filtered CSV export.
 
 ---
 
@@ -80,15 +80,16 @@ sanmist-platform/
 │   ├── app/
 │   │   └── main.py                              # FastAPI service, Bearer auth, MQTT subscriber, ML inference & SHA-256 SQLite ledger
 │   └── tests/
-│       └── test_platform.py                     # Automated unit & integration tests (auth, SEI consistency, MQTT, SHA-256 chain verification)
+│       └── test_platform.py                     # Automated unit & integration tests (9 tests: auth, SEI, pagination, MQTT auth, SHA-256 chain)
 ├── firmware/
 │   ├── src/
-│   │   └── main.cpp                             # ESP32 Arduino firmware (DHT22, flow proxy, E-Stop ISR, MQTT client)
+│   │   └── main.cpp                             # ESP32 Arduino firmware (DHT22, flow proxy, 2 kHz piezo tone, E-Stop ISR, MQTT client)
 │   ├── diagram.json                             # Wokwi hardware simulation schematic
 │   ├── platformio.ini                           # PlatformIO build & library configuration
 │   └── wokwi.toml                               # Wokwi simulator binary mapping
 ├── frontend/
-│   └── index.html                               # Command Center dashboard (Tailwind CSS + Vanilla JS)
+│   ├── index.html                               # Command Center dashboard (Vanilla JS + CSS custom properties)
+│   └── tailwind.css                             # Compiled local Tailwind CSS stylesheet
 ├── ml-pipeline/
 │   ├── datasets/
 │   │   └── sanmist_telemetry_synthetic.csv      # 3,000-sample balanced synthetic BOH telemetry dataset (1,000 per class)
@@ -97,8 +98,13 @@ sanmist-platform/
 │   │   └── xgboost_sei_classifier.pkl           # Fallback pickled XGBoost model artifact
 │   ├── generate_dataset.py                      # Balanced synthetic telemetry & SEI ground-truth generator
 │   └── train_model.py                           # XGBoost training & evaluation pipeline
+├── mosquitto/
+│   └── config/
+│       └── mosquitto.conf                       # Local Eclipse Mosquitto broker configuration for Docker deployments
+├── .dockerignore                                # Docker build context exclusions
+├── Dockerfile                                   # Python 3.12 container image for backend and frontend services
+├── docker-compose.yml                           # Multi-container orchestration (Mosquitto + FastAPI Backend + Frontend)
 ├── requirements.txt                             # Python runtime dependencies
-├── BUG_REPORT.md                                # Bug audit, resolution log & phased verification status
 └── README.md                                    # Project documentation
 ```
 
@@ -199,15 +205,23 @@ Navigate to http://localhost:3000. On load, the **MistSan Command Center** Login
 #### Dashboard Controls & Features
 
 - **KPI & Visual SEI Gauge:** Displays latest station ID, PHT (`Asia/Manila`) timestamp, XGBoost efficacy & `ml_confidence`, a 0.0–4.0+ visual SEI bar with markers at `1.800` (Marginal) and `2.800` (PD 856 Pass), and total cycle counts (`Pass`, `Marginal`, `Fail`, `E-Stop`).
-- **Live Sensor Telemetry Strip:** Shows latest `Ambient Temp (°C)`, `Rel. Humidity (%)`, `Atomizer Flow (mL/min)`, and `Duration / Vol`.
-- **Remote Station Trigger & Live Estimated SEI Preview:** Configure target `Duration (s)` (`5–300`) and `Room Vol (m³)` (`0.1–200`). As inputs change, the **Estimated SEI Preview** pill recalculates `estSei = (30.0 * (duration / 60.0)) / volume` (nominal `30.0 mL/min` at `25°C / 65% RH`) and indicates `Pass (≥ 2.800)`, `Marginal (1.800–2.799)`, or `Fail (< 1.800)`. Clicking **Dispatch Cycle** sends `POST /api/v1/trigger` and opens a live countdown bar (`1s` pre-warning + misting phase) before refreshing the ledger.
+- **Live Sensor Telemetry Strip:** Shows latest `Ambient Temp (°C)`, `Rel. Humidity (%)`, `Atomizer Flow (mL/min)`, and `Last Spec (Duration / Vol)`, badged as `LIVE STREAM` when receiving station heartbeats on `sanmist/devices/+/status` or `LAST CYCLE` fallback.
+- **Remote Station Trigger, Live SEI Preview & Safety Modal:** Configure target `Duration (s)` (`5–300`) and `Room Size (m³)` (`0.1–200`) or select quick duration preset chips. As inputs change, the **Estimated SEI Preview** pill mirrors the backend's evaporation-adjusted SEI formula using live DHT22 temperature/humidity and flow rate when streaming (or nominal `25.0°C · 65% RH · 30.0 mL/min` fallback) and indicates `Pass (≥ 2.800)`, `Marginal (< 2.800)`, or `Fail (< 1.800)`. Clicking **Review & Start Cycle** opens a pre-dispatch safety confirmation modal requiring operator area-clear verification before sending `POST /api/v1/trigger` and starting the live countdown bar (`1s` pre-warning + misting phase).
 - **Immutable Sanitization Logbook & Ledger Chain Verifier:**
-  - **Integrity Badge (`#ledger-integrity-badge`):** Updates on every 3-second poll using `stats.ledger_verified` and `stats.latest_hash` (`SHA-256 Chain Verified` in emerald, or pulsing `Tamper Alert!` in rose).
+  - **Integrity Badge (`#ledger-integrity-badge`):** Updates on every 3-second poll using `stats.ledger_verified` and `stats.latest_hash` (`Verified (<short-hash>)` in emerald, or `Tamper Alert!` in rose).
   - **Verify Ledger Chain Button:** Calls `GET /api/v1/ledger/verify` and renders a verification banner displaying `checked_records`, truncated `latest_hash`, and any `tampered_ids` detected.
-  - **Chain Hash Column:** Displays a truncated `record_hash` monospace pill (`first 8…last 6` hex chars) with a hover tooltip showing full `Hash` and `Prev` SHA-256 values.
-  - **Search, Status Filter Pills & CSV Export:** Filter by station/ID/status (`All`, `Pass`, `Marginal`, `Fail`, `E-Stop`) and export visible records to CSV (including `prev_hash` and `record_hash`).
+  - **SHA-256 Hash Column & Row Inspector:** Displays a truncated `record_hash` monospace pill (`first 8…last 6` hex chars); clicking any row expands full `Record SHA-256` and `Prev SHA-256` digests with 1-click copy buttons.
+  - **Server-Side Pagination, Search, Status Filter Pills & CSV Export:** Filter by station/ID/status (`All`, `Pass`, `Marginal`, `Fail`, `E-Stop`), paginate (`10`, `25`, or `50` rows per page), and export all matching filtered records across pages to CSV (including `prev_hash` and `record_hash`).
 
-### 5. Build & Simulate the ESP32 Firmware
+### 5. Quick Start with Docker Compose *(Optional)*
+
+To launch the local Eclipse Mosquitto MQTT broker (`:1883`), FastAPI backend (`:8000`, with `SANMIST_MQTT_REQUIRE_AUTH=1`), and frontend server (`:3000`) in containers:
+
+```powershell
+docker compose up --build
+```
+
+### 6. Build & Simulate the ESP32 Firmware
 
 1. Open the `firmware/` directory in VS Code with the **PlatformIO** and **Wokwi** extensions installed.
 2. Build the firmware binary:
@@ -216,13 +230,13 @@ Navigate to http://localhost:3000. On load, the **MistSan Command Center** Login
    ```
 3. Open `firmware/diagram.json` and start the **Wokwi Simulator** to connect to `Wokwi-GUEST` Wi-Fi and publish/receive cycle telemetry over `broker.emqx.io`.
 
-### 6. Run the Automated Backend Test Suite
+### 7. Run the Automated Backend Test Suite
 
 ```powershell
 .\.venv\Scripts\python.exe backend/tests/test_platform.py
 ```
 
-Covers unauthenticated `401` enforcement, login/session/logout lifecycle, per-cycle UTC timestamps, SEI/compliance consistency, `X-Total-Count` pagination, search/status filtering, MQTT trigger & deduplication, SHA-256 hash-chain linkage, direct SQL tampering detection, and legacy-row backfill migration.
+Runs **9 unit and integration tests** covering unauthenticated `401` enforcement, login/session/logout lifecycle, per-cycle UTC timestamps, SEI/compliance consistency, `X-Total-Count` and `X-Filtered-Count` server-side pagination, search/status filtering, MQTT trigger & deduplication, HMAC-SHA256 / `auth_key` MQTT payload verification, SHA-256 hash-chain linkage, direct SQL tampering detection, and legacy-row backfill migration.
 
 ---
 
@@ -306,11 +320,11 @@ Evaluates a sanitization cycle payload using the evaporation-adjusted SEI formul
 }
 ```
 
-### `GET /api/v1/records?limit=50&status=all&search=` *(Bearer Auth Required)*
-Returns the most recent sanitization cycle records from `sanmist_audit.db` (ordered newest first), including `prev_hash` and `record_hash`, and sets the `X-Total-Count` response header to the total row count. Supports filtering by `status` (`all`, `pass`, `marginal`, `fail`, `e-stop`) and `search` (`station_id`, `compliance_status`, or `id`).
+### `GET /api/v1/records?limit=50&offset=0&status=all&search=` *(Bearer Auth Required)*
+Returns paginated sanitization cycle records from `sanmist_audit.db` (ordered newest first), including `prev_hash` and `record_hash`, and sets `X-Total-Count` (all database records) and `X-Filtered-Count` (matching filtered records) response headers. Supports filtering by `status` (`all`, `pass`, `marginal`, `fail`, `e-stop`), `search` (`station_id`, `compliance_status`, or `id`), `limit` (`1–5000`), and `offset` (`>= 0`).
 
 ### `GET /api/v1/stats` *(Bearer Auth Required)*
-Returns aggregate cycle breakdown counts (`total_cycles`, `pass_count`, `marginal_count`, `fail_count`, `estop_count`, `pass_rate_pct`) alongside live hash-chain integrity fields (`ledger_verified`, `latest_hash`).
+Returns aggregate cycle breakdown counts (`total_cycles`, `pass_count`, `marginal_count`, `fail_count`, `estop_count`, `pass_rate_pct`), live hash-chain integrity fields (`ledger_verified`, `latest_hash`), broker connection status (`mqtt_connected`), and the latest station heartbeat snapshot (`live_telemetry`).
 
 ### `GET /api/v1/ledger/verify` *(Bearer Auth Required)*
 Walks every row in `cycle_records` ordered by `id ASC`, checking that each row's `prev_hash` links cleanly from genesis `"0" * 64` and its `record_hash` matches the recomputed deterministic SHA-256 digest.
@@ -326,13 +340,13 @@ Walks every row in `cycle_records` ordered by `id ASC`, checking that each row's
 ```
 
 ### `POST /api/v1/trigger` *(Bearer Auth Required)*
-Publishes an authenticated `START` command (`duration_sec`, `room_volume_m3`, `triggered_by`) to `sanmist/control/trigger` over MQTT; returns HTTP `503` if the MQTT broker is disconnected or publishing fails.
+Publishes an authenticated `START` command (`duration_sec`, `room_volume_m3`, `triggered_by`, `auth_key`, and HMAC-SHA256 `signature`) to `sanmist/control/trigger` over MQTT; returns HTTP `503` if the MQTT broker is disconnected or publishing fails.
 
 ---
 
 ## Project Status
 
-This repository is an active prototype demonstrating an end-to-end IoT + ML compliance pipeline. Current prototype constraints include:
+This repository is an active prototype demonstrating an end-to-end IoT + ML compliance pipeline. Current prototype notes include:
 - **Synthetic Training Data:** The XGBoost classifier is trained on simulated BOH telemetry (`ml-pipeline/datasets/sanmist_telemetry_synthetic.csv`) rather than field sensor logs.
-- **Public Test Broker:** Telemetry defaults to the public `broker.emqx.io` broker (`1883`) without TLS or MQTT credentials for Wokwi simulator compatibility.
+- **Broker Configuration:** Local development defaults to `broker.emqx.io:1883` for Wokwi simulator compatibility, while `docker-compose.yml` provisions an isolated `eclipse-mosquitto:2` broker with `SANMIST_MQTT_REQUIRE_AUTH=1` enforcing device `auth_key` / HMAC-SHA256 signatures.
 - **Hardware Simulation:** Firmware defaults (`Wokwi-GUEST` Wi-Fi and `DEFAULT_MIST_DURATION_MS = 30000`) are configured for Wokwi simulation and require physical sensor/relay calibration before production deployment.
