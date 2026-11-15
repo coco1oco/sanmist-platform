@@ -68,7 +68,7 @@ flowchart LR
 - **Dual Ingestion Modes, Deduplication & Payload Auth:** Accepts device telemetry asynchronously via MQTT (`sanmist/devices/+/telemetry`, with a 3-second deduplication window) and live sensor heartbeats (`sanmist/devices/+/status`), as well as synchronously over HTTP (`POST /api/v1/telemetry/evaluate`). Supports shared `auth_key` and HMAC-SHA256 `signature` verification across MQTT control and telemetry payloads.
 - **Bearer-Token Authentication:** Protects operational endpoints (`/api/v1/records`, `/api/v1/stats`, `/api/v1/ledger/verify`, `/api/v1/trigger`, `/api/v1/auth/me`, `/api/v1/auth/logout`) using PBKDF2-SHA256 salted password hashes and timed session tokens persisted in SQLite (`users` and `auth_sessions`).
 - **Tamper-Evident SHA-256 Audit Ledger:** Every row in `cycle_records` is cryptographically linked to its predecessor (`prev_hash`, starting from genesis `"0" * 64`) and sealed with a deterministic SHA-256 `record_hash` over canonical cycle fields, verifiable on demand via `GET /api/v1/ledger/verify`.
-- **Command Center Dashboard UI:** Industrial compliance console with Dark/Light theme switcher, Login Overlay & demo quick-fill buttons, Live Sensor Telemetry Strip, Visual SEI Gauge, Remote Station Trigger with Live Evaporation-Adjusted SEI Preview, Pre-Dispatch Safety Confirmation Modal & active cycle countdown bar, Server-Side Pagination, Search & Status Filter Pills, SHA-256 Ledger Integrity Badge & Verify Action, expandable SHA-256 row inspector, and full filtered CSV export.
+- **Command Center Dashboard UI:** Industrial compliance console with Dark/Light theme switcher, Login Overlay & admin demo quick-fill button, Live Sensor Telemetry Strip, Visual SEI Gauge, Remote Station Trigger with Live Evaporation-Adjusted SEI Preview, Pre-Dispatch Safety Confirmation Modal & active cycle countdown bar, Server-Side Pagination, Search & Status Filter Pills, SHA-256 Ledger Integrity Badge & Verify Action, expandable SHA-256 row inspector, and full filtered CSV export.
 
 ---
 
@@ -192,14 +192,13 @@ Serve `frontend/index.html` via a local static file server:
 
 Navigate to http://localhost:3000. On load, the **MistSan Command Center** Login Overlay prompts for Bearer-token authentication.
 
-#### Default Seeded Accounts
+#### Default Seeded Account
 
 | Role | Username | Default Password | Environment Override |
 | :--- | :--- | :--- | :--- |
 | Safety Administrator | `admin` | `sanmist2026` | `SANMIST_ADMIN_PASSWORD` |
-| Station Operator | `operator` | `operator123` | `SANMIST_OPERATOR_PASSWORD` |
 
-- The login modal includes **1-click Demo Credential fillers** (`Admin Demo` and `Operator Demo`) for rapid local testing.
+- The login modal includes a **1-click `Admin Demo` credential filler** for rapid local testing.
 - Sessions issue a Bearer token (`SESSION_TTL_HOURS`, default `24` hours) stored in `localStorage` under `sanmist_auth_token`. Any `401` API response automatically clears the token and returns to the Login Overlay.
 
 #### Dashboard Controls & Features
@@ -257,7 +256,7 @@ Returns service health, XGBoost model load status, and current MQTT broker conne
 ```
 
 ### `POST /api/v1/auth/login` *(Public)*
-Authenticates an operator account (`admin` or `operator`) and returns a Bearer session token.
+Authenticates the administrator account (`admin`) and returns a Bearer session token.
 
 **Request:**
 ```json

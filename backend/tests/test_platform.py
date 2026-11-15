@@ -128,6 +128,11 @@ class SanMistPlatformTests(unittest.TestCase):
         )
         self.assertEqual(bad_code, 401)
 
+        op_code, _, _ = call_api(
+            "POST", "/api/v1/auth/login", body={"username": "operator", "password": "operator123"}
+        )
+        self.assertEqual(op_code, 401)
+
         token = self._login_admin()
         auth_headers = {"Authorization": f"Bearer {token}"}
 

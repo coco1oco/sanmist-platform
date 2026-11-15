@@ -158,35 +158,25 @@ def _verify_ledger_chain(cursor: sqlite3.Cursor) -> dict:
 
 
 def _seed_default_users(cursor: sqlite3.Cursor) -> None:
-    cursor.execute("SELECT COUNT(*) FROM users")
+    # Remove legacy secondary 'operator' account so only the single admin user remains
+    cursor.execute("DELETE FROM users WHERE username = 'operator'")
+    cursor.execute("DELETE FROM auth_sessions WHERE username = 'operator'")
+
+    cursor.execute("SELECT COUNT(*) FROM users WHERE username = 'admin'")
     if cursor.fetchone()[0] > 0:
         return
 
     now_iso = datetime.now(timezone.utc).isoformat()
-    default_accounts = [
-        (
-            "admin",
-            os.getenv("SANMIST_ADMIN_PASSWORD", "sanmist2026"),
-            "SanMist Lead Auditor",
-            "Safety Administrator",
-        ),
-        (
-            "operator",
-            os.getenv("SANMIST_OPERATOR_PASSWORD", "operator123"),
-            "BOH Station Operator",
-            "Station Operator",
-        ),
-    ]
-    for username, raw_password, full_name, role in default_accounts:
-        pwd_hash, salt_hex = _hash_password(raw_password)
-        cursor.execute(
-            """
-            INSERT INTO users (username, password_hash, salt, full_name, role, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (username, pwd_hash, salt_hex, full_name, role, now_iso),
-        )
-    print("[AUTH] Seeded default dashboard operator accounts (admin, operator).")
+    raw_password = os.getenv("SANMIST_ADMIN_PASSWORD", "sanmist2026")
+    pwd_hash, salt_hex = _hash_password(raw_password)
+    cursor.execute(
+        """
+        INSERT INTO users (username, password_hash, salt, full_name, role, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        ("admin", pwd_hash, salt_hex, "SanMist Lead Auditor", "Safety Administrator", now_iso),
+    )
+    print("[AUTH] Seeded default dashboard administrator account (admin).")
 
 
 def init_db() -> None:
