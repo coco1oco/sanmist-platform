@@ -1,2071 +1,1489 @@
 <!DOCTYPE html>
 <html lang="en" data-theme="dark">
-
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MistSan Command Center — Operational &amp; Compliance Ledger</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="tailwind.css" />
-  <style>
-    :root,
-    :root[data-theme="dark"] {
-      color-scheme: dark;
-      --bg: #0a0a0c;
-      --surface: #131418;
-      --surface-2: #1a1c22;
-      --surface-3: #23262f;
-      --border: #2a2e39;
-      --border-strong: #3f4556;
-      --text: #f4f4f6;
-      --text-2: #d1d5db;
-      --text-3: #8e95a5;
-      --primary: #3b82f6;
-      --primary-hover: #2563eb;
-      --primary-fg: #ffffff;
-      --focus: #60a5fa;
-      --sei: #818cf8;
-      --sei-soft: rgba(129, 140, 248, 0.16);
-      --pass: #34d399;
-      --pass-soft: rgba(52, 211, 153, 0.13);
-      --marginal: #f59e0b;
-      --marginal-soft: rgba(245, 158, 11, 0.13);
-      --fail: #ef4444;
-      --fail-soft: rgba(239, 68, 68, 0.14);
-      --estop: #f43f5e;
-      --estop-soft: rgba(244, 63, 94, 0.16);
-      --info-soft: rgba(96, 165, 250, 0.14);
-      --sensor-temp: #38bdf8;
-      --sensor-hum: #22d3ee;
-      --sensor-flow: #a78bfa;
-      --overlay: rgba(6, 6, 8, 0.82);
-    }
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SanMist Fleet Command &amp; Compliance Ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+/* =========================================================
+   DESIGN TOKENS
+   ========================================================= */
+:root, :root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #000000;
+  --surface: #0b0b0e;
+  --surface-card: #131317;
+  --surface-sub: #1b1b21;
+  --surface-input: #09090b;
+  --border: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.2);
+  --border-focus: #3b82f6;
+  --text: #f8fafc;
+  --text-sub: #a1a1aa;
+  --text-muted: #71717a;
+  --primary: #0071e3;
+  --primary-hover: #0a84ff;
+  --primary-fg: #ffffff;
+  --accent: #60a5fa;
+  --pass: #34d399;
+  --marginal: #fbbf24;
+  --fail: #f87171;
+  --estop: #fb7185;
+  --sei: #818cf8;
+  --orange: #fb923c;
+  --cyan: #22d3ee;
+  --violet: #a78bfa;
+  --overlay: rgba(0, 0, 0, 0.82);
+  --row-hover: rgba(255, 255, 255, 0.04);
+  --shadow: 0 0 0 1px rgba(255, 255, 255, 0.03), 0 24px 48px -24px rgba(0, 0, 0, 0.9);
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f4f6fa;
+  --surface: #ffffff;
+  --surface-card: #ffffff;
+  --surface-sub: #eef1f7;
+  --surface-input: #ffffff;
+  --border: rgba(15, 23, 42, 0.09);
+  --border-strong: rgba(15, 23, 42, 0.18);
+  --border-focus: #2563eb;
+  --text: #0f172a;
+  --text-sub: #475569;
+  --text-muted: #7c8aa0;
+  --primary: #0f172a;
+  --primary-hover: #1e293b;
+  --primary-fg: #ffffff;
+  --accent: #2563eb;
+  --pass: #059669;
+  --marginal: #d97706;
+  --fail: #dc2626;
+  --estop: #be123c;
+  --sei: #4f46e5;
+  --orange: #ea580c;
+  --cyan: #0891b2;
+  --violet: #7c3aed;
+  --overlay: rgba(15, 23, 42, 0.45);
+  --row-hover: rgba(15, 23, 42, 0.035);
+  --shadow: 0 18px 40px -22px rgba(15, 23, 42, 0.22);
+}
 
-    :root[data-theme="light"] {
-      color-scheme: light;
-      --bg: #eef2f6;
-      --surface: #ffffff;
-      --surface-2: #f8fafc;
-      --surface-3: #e2e8f0;
-      --border: #d5dde7;
-      --border-strong: #94a3b8;
-      --text: #0f172a;
-      --text-2: #334155;
-      --text-3: #64748b;
-      --primary: #0f766e;
-      --primary-hover: #0d625b;
-      --primary-fg: #ffffff;
-      --focus: #0284c7;
-      --sei: #4338ca;
-      --sei-soft: rgba(67, 56, 202, 0.12);
-      --pass: #15803d;
-      --pass-soft: #dcfce7;
-      --marginal: #b45309;
-      --marginal-soft: #fef3c7;
-      --fail: #b91c1c;
-      --fail-soft: #fee2e2;
-      --estop: #be123c;
-      --estop-soft: #ffe4e6;
-      --info-soft: #e0f2fe;
-      --sensor-temp: #0369a1;
-      --sensor-hum: #0e7490;
-      --sensor-flow: #6d28d9;
-      --overlay: rgba(15, 23, 42, 0.56);
-    }
+/* =========================================================
+   BASE
+   ========================================================= */
+*, *::before, *::after { box-sizing: border-box; }
+html, body {
+  margin: 0; min-height: 100vh; background: var(--bg); color: var(--text);
+  font-family: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
+  letter-spacing: -0.01em; line-height: 1.5; -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3, p, dl, dd, dt { margin: 0; }
+button, input, select { font-family: inherit; font-size: 100%; color: inherit; margin: 0; }
+button { cursor: pointer; }
+::-webkit-scrollbar { display: none !important; width: 0 !important; }
+.hidden { display: none !important; }
+.mono { font-family: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif; font-variant-numeric: tabular-nums; }
+.hash { font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; letter-spacing: 0; }
+.muted { color: var(--text-muted); }
+.sub { color: var(--text-sub); }
 
-    * {
-      box-sizing: border-box;
-      scrollbar-width: none;
-      -ms-overflow-style: none;
-    }
+/* Semantic tone system (color labelling) */
+.tone-pass  { --tone: var(--pass); }
+.tone-warn  { --tone: var(--marginal); }
+.tone-fail  { --tone: var(--fail); }
+.tone-estop { --tone: var(--estop); }
+.tone-temp  { --tone: var(--orange); }
+.tone-hum   { --tone: var(--cyan); }
+.tone-flow  { --tone: var(--violet); }
+.tone-sei   { --tone: var(--sei); }
+.tone-info  { --tone: var(--accent); }
+.tone-muted { --tone: var(--text-muted); }
+.tone-text  { color: var(--tone); }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 12px; border-radius: 9999px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.02em; white-space: nowrap;
+  color: var(--tone, var(--text-sub));
+  background: color-mix(in srgb, var(--tone, var(--text-muted)) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tone, var(--text-muted)) 32%, transparent);
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--tone, var(--text-muted)); box-shadow: 0 0 8px color-mix(in srgb, var(--tone, transparent) 70%, transparent); flex-shrink: 0; }
+.tone-card {
+  position: relative; overflow: hidden;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tone) 10%, var(--surface-card)), var(--surface-card) 70%);
+  border: 1px solid color-mix(in srgb, var(--tone) 28%, var(--border));
+  border-radius: 18px; padding: 20px 22px;
+}
+.tone-card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--tone); }
 
-    html,
-    body {
-      margin: 0;
-      min-height: 100vh;
-      background: var(--bg);
-      color: var(--text);
-      font-family: "Inter", system-ui, -apple-system, sans-serif;
-      -webkit-font-smoothing: antialiased;
-      scrollbar-width: none;
-      -ms-overflow-style: none;
-    }
+/* Surfaces */
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 24px; box-shadow: var(--shadow); padding: 32px; }
+.card { background: var(--surface-card); border: 1px solid var(--border); border-radius: 18px; padding: 20px 22px; }
+.eyebrow { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent); }
+.label { display: block; font-size: 12px; font-weight: 600; color: var(--text-sub); margin-bottom: 8px; }
+.tiny-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
 
-    ::-webkit-scrollbar,
-    html::-webkit-scrollbar,
-    body::-webkit-scrollbar,
-    *::-webkit-scrollbar {
-      display: none !important;
-      width: 0 !important;
-      height: 0 !important;
-      background: transparent !important;
-    }
+/* Inputs & buttons */
+.input {
+  width: 100%; background: var(--surface-input); color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: 12px;
+  font-size: 14px; padding: 13px 16px; transition: all .15s ease;
+}
+.input:focus { outline: none; border-color: var(--border-focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--border-focus) 25%, transparent); }
+.input-sm { padding: 8px 12px; font-size: 12px; width: auto; }
+.input-unit { position: relative; }
+.input-unit .input { padding-right: 52px; text-align: right; }
+.input-unit .unit { position: absolute; right: 18px; top: 50%; transform: translateY(-50%); font-size: 12px; color: var(--text-muted); pointer-events: none; }
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  background: var(--primary); color: var(--primary-fg);
+  border: 0; border-radius: 12px; padding: 14px 24px;
+  font-size: 13px; font-weight: 600; transition: all .15s ease;
+}
+.btn:hover:not(:disabled) { background: var(--primary-hover); transform: translateY(-1px); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn-block { width: 100%; }
+.btn-sm { padding: 9px 18px; font-size: 12px; }
+.btn-ghost {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  background: var(--surface-sub); color: var(--text-sub);
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 9px 16px; font-size: 12px; font-weight: 500; transition: all .15s ease;
+}
+.btn-ghost:hover { color: var(--text); border-color: var(--border-strong); }
 
-    .mono {
-      font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
-      font-variant-numeric: tabular-nums;
-    }
+/* =========================================================
+   APP SHELL / HEADER
+   ========================================================= */
+.shell { min-height: 100vh; display: flex; flex-direction: column; }
+.topbar {
+  position: sticky; top: 0; z-index: 30;
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px 24px;
+  padding: 16px 40px; background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(12px); border-bottom: 1px solid var(--border);
+}
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand-mark { width: 32px; height: 32px; border-radius: 10px; background: linear-gradient(135deg, #2563eb, #6366f1); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; }
+.brand-name { font-size: 14px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.topbar-left, .topbar-right { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.station-select { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-radius: 12px; border: 1px solid var(--border-strong); background: var(--surface-card); }
+.station-select select { background: transparent; border: 0; font-size: 12px; font-weight: 600; outline: none; cursor: pointer; }
+.station-select select option { background: var(--surface-card); color: var(--text); }
+.nav { display: flex; align-items: center; gap: 4px; padding: 4px; border-radius: 14px; background: var(--surface-sub); }
+.nav-pill {
+  padding: 8px 20px; font-size: 13px; font-weight: 500; color: var(--text-muted);
+  border-radius: 10px; border: 0; background: transparent; transition: all .15s ease;
+}
+.nav-pill:hover { color: var(--text); }
+.nav-pill[aria-pressed="true"] { background: var(--surface-card); color: var(--text); font-weight: 600; box-shadow: 0 2px 10px rgba(0,0,0,.12); }
+.icon-btn { width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-sub); color: var(--text-sub); }
+.icon-btn:hover { color: var(--text); }
+.icon-btn svg { width: 16px; height: 16px; }
+main.content { width: 100%; max-width: 1280px; margin: 0 auto; padding: 40px 40px 120px; flex: 1; }
+.stack { display: flex; flex-direction: column; gap: 28px; }
 
-    .panel {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-    }
+/* Overview */
+.grid-2 { display: grid; grid-template-columns: 1.15fr 1fr; gap: 28px; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+.panel-body { display: flex; flex-direction: column; gap: 24px; }
+.headline { font-size: 24px; font-weight: 700; line-height: 1.3; }
+.tile-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.tile-grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+.stat-tile { padding: 16px 18px; }
+.stat-tile .v { font-size: 15px; font-weight: 700; margin-top: 6px; }
+.gauge { position: relative; height: 10px; border-radius: 9999px; background: var(--surface-sub); overflow: visible; margin-top: 14px; }
+.gauge-fill { height: 100%; border-radius: 9999px; transition: width .4s ease; background: var(--tone, var(--sei)); width: 0%; }
+.gauge-marker { position: absolute; top: -5px; bottom: -5px; width: 2px; background: var(--text-sub); left: 66.67%; border-radius: 2px; }
+.gauge-legend { display: flex; justify-content: space-between; margin-top: 10px; font-size: 10px; }
+.sensor { padding: 20px 22px 18px; }
+.sensor .big { font-size: 28px; font-weight: 700; margin: 10px 0 6px; color: var(--tone); line-height: 1.1; }
+.sensor .src { font-size: 10px; color: var(--text-muted); }
+.sensor-head { display: flex; align-items: center; justify-content: space-between; }
+.link-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; font-size: 12px; }
+.link-row + .link-row { border-top: 1px dashed var(--border); }
+.link-row .val { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; color: var(--tone); }
+.kpi-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; }
+.kpi { padding: 18px 20px; text-align: left; transition: transform .15s ease, border-color .15s ease; }
+.kpi.clickable { cursor: pointer; }
+.kpi.clickable:hover { transform: translateY(-2px); border-color: var(--tone); }
+.kpi .k-label { font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--tone); }
+.kpi .k-val { font-size: 24px; font-weight: 700; margin-top: 8px; line-height: 1; }
 
-    .subpanel {
-      background: var(--surface-2);
-      border: 1px solid var(--border);
-      border-radius: 9px;
-    }
+/* Two-column form pages (Schedules / Settings) */
+.split { display: grid; grid-template-columns: 380px 1fr; gap: 28px; align-items: start; }
+.split-aside { display: flex; flex-direction: column; gap: 24px; }
+.page-title { font-size: 30px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; margin-top: 8px; }
+.info-list { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--border); padding-top: 20px; }
+.info-item { display: flex; align-items: center; gap: 14px; padding: 10px 0; font-size: 12px; color: var(--text-sub); }
+.info-ico { width: 24px; height: 24px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: var(--tone); background: none; border: 0; }
+.info-ico svg { width: 20px; height: 20px; }
+.pw-wrap { position: relative; }
+.pw-wrap .input { padding-right: 64px; }
+.pw-toggle { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: 0; padding: 6px 10px; font-size: 11px; font-weight: 600; color: var(--text-muted); border-radius: 8px; }
+.pw-toggle:hover { color: var(--text); background: var(--surface-sub); }
+.form-card { display: flex; flex-direction: column; gap: 26px; padding: 36px; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.field-hint { font-size: 11px; color: var(--text-muted); margin-top: 8px; }
+.day-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.day-chip {
+  min-width: 58px; padding: 10px 14px; border-radius: 12px; font-size: 12px; font-weight: 600;
+  background: var(--surface-input); color: var(--text-muted); border: 1px solid var(--border-strong);
+  transition: all .15s ease;
+}
+.day-chip:hover { color: var(--text); }
+.day-chip[aria-pressed="true"] { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.quick-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.summary-card { display: flex; flex-direction: column; gap: 10px; }
+.summary-line { font-size: 13px; font-weight: 600; line-height: 1.5; }
+.divider { height: 1px; background: var(--border); border: 0; margin: 0; }
+.device-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; }
 
-    .surface-input {
-      background: var(--surface-2);
-      color: var(--text);
-      border: 1px solid var(--border-strong);
-      border-radius: 8px;
-    }
+/* Ledger */
+.ledger { padding: 0; overflow: hidden; }
+.ledger-head { padding: 28px 32px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--border); }
+.ledger-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.seg { display: flex; gap: 2px; padding: 4px; border-radius: 12px; background: var(--surface-sub); }
+.seg .nav-pill { padding: 6px 14px; font-size: 12px; }
+.ledger-bar { padding: 16px 32px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--border); background: var(--surface-card); font-size: 12px; }
+.ledger-bar .group { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.banner { padding: 14px 32px; font-size: 12px; font-weight: 500; border-bottom: 1px solid var(--border); color: var(--tone); background: color-mix(in srgb, var(--tone) 12%, transparent); }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }
+thead th:first-child, tbody td:first-child { padding-left: 28px; }
+thead th:last-child, tbody td:last-child { padding-right: 28px; }
+thead th { padding: 16px 12px; font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); background: var(--surface-card); border-bottom: 1px solid var(--border); white-space: nowrap; }
+tbody td { padding: 18px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+tbody tr.row { cursor: pointer; transition: background .12s ease; }
+tbody tr.row:hover { background: var(--row-hover); }
+tbody tr.expand td { background: var(--surface-sub); padding: 20px 28px; white-space: normal; }
+.station-chip { display: inline-block; padding: 3px 10px; border-radius: 8px; font-weight: 600; font-size: 11px; background: var(--surface-sub); border: 1px solid var(--border); }
+.status-pass   { --tone: var(--pass); }
+.status-marginal { --tone: var(--marginal); }
+.status-fail   { --tone: var(--fail); }
+.status-estop  { --tone: var(--estop); }
+.expand-inner { position: sticky; left: 0; width: var(--wrap-w, 100%); display: flex; flex-direction: column; gap: 20px; }
+.detail-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.detail-item { padding: 14px 18px; border-radius: 12px; background: var(--surface-card); border: 1px solid var(--border); }
+.detail-item .v { margin-top: 6px; font-size: 13px; font-weight: 600; }
+.hash-grid { display: flex; flex-direction: column; gap: 14px; }
+.hash-box { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 18px 22px; border-radius: 12px; background: var(--surface-card); border: 1px solid var(--border); min-width: 0; }
+.hash-box .txt { min-width: 0; white-space: normal; word-break: break-all; line-height: 1.7; }
+.pager { padding: 18px 32px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; border-top: 1px solid var(--border); background: var(--surface-card); font-size: 12px; }
+.pager .group { display: flex; align-items: center; gap: 12px; }
+.c-temp { color: var(--orange); font-weight: 500; }
+.c-hum { color: var(--cyan); font-weight: 500; }
+.c-flow { color: var(--violet); font-weight: 500; }
 
-    .surface-input:focus {
-      outline: none;
-      border-color: var(--focus);
-      box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus) 25%, transparent);
-    }
+/* =========================================================
+   FAB, MODALS, E-STOP
+   ========================================================= */
+#btn-fab-start-cycle {
+  position: fixed; bottom: 28px; right: 28px; z-index: 40;
+  display: flex; align-items: center; gap: 10px; padding: 14px 26px; border-radius: 9999px;
+  background: #0071e3; color: #fff; font-size: 13px; font-weight: 600;
+  border: 1px solid rgba(255,255,255,.25); box-shadow: 0 12px 28px -6px rgba(0,113,227,.55);
+  transition: all .2s ease;
+}
+#btn-fab-start-cycle:hover { transform: translateY(-2px); }
+#btn-fab-start-cycle.active-cycle { background: #059669; border-color: rgba(16,185,129,.5); box-shadow: 0 12px 28px -6px rgba(16,185,129,.55); }
+.overlay { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 20px; background: var(--overlay); backdrop-filter: blur(4px); }
+.modal { width: 100%; max-width: 520px; display: flex; flex-direction: column; gap: 24px; padding: 32px; }
+.modal-sm { max-width: 460px; }
+.modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
+.modal-head h2 { font-size: 20px; font-weight: 700; }
+.modal-head p { font-size: 12px; margin-top: 4px; }
+.row-between { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.alert { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border-radius: 14px; font-size: 12px; color: var(--tone); background: color-mix(in srgb, var(--tone) 12%, transparent); border: 1px solid color-mix(in srgb, var(--tone) 35%, transparent); }
+.progress { height: 8px; border-radius: 9999px; background: var(--surface-sub); overflow: hidden; margin-top: 12px; }
+.progress > div { height: 100%; background: var(--accent); border-radius: 9999px; transition: width .2s ease; width: 0; }
+.dl { padding: 0; overflow: hidden; }
+.dl .r { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; font-size: 12px; }
+.dl .r + .r { border-top: 1px solid var(--border); }
+.check { display: flex; align-items: flex-start; gap: 12px; padding: 16px 18px; font-size: 12px; font-weight: 500; cursor: pointer; user-select: none; }
+.check input { margin-top: 2px; width: 16px; height: 16px; accent-color: #0071e3; }
+.btn-row { display: flex; flex-direction: column; gap: 12px; padding-top: 20px; border-top: 1px solid var(--border); }
+.grid-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
-    .btn-cta {
-      background: var(--primary);
-      color: var(--primary-fg);
-      font-weight: 700;
-      border-radius: 9px;
-      transition: background-color 0.14s ease, opacity 0.14s ease;
-    }
+/* Emergency stop: always legible, even when idle */
+.estop-btn {
+  width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 14px 18px; border-radius: 12px; font-size: 12px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .08em;
+  color: var(--estop); background: color-mix(in srgb, var(--estop) 9%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--estop) 45%, transparent);
+  cursor: not-allowed; transition: all .2s ease;
+}
+.estop-btn .dot { background: color-mix(in srgb, var(--estop) 55%, transparent); box-shadow: none; }
+.estop-btn.is-active { color: #fff; background: #dc2626; border: 1px solid #b91c1c; cursor: pointer; box-shadow: 0 0 18px rgba(220,38,38,.55); animation: pulse 1.6s ease-in-out infinite; }
+.estop-btn.is-active .dot { background: #fff; }
+@keyframes pulse { 50% { opacity: .75; } }
 
-    .btn-cta:hover:not(:disabled) {
-      background: var(--primary-hover);
-    }
+/* Login */
+.login-wrap { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; background: var(--bg); }
+.login-body { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.login-card { width: 100%; max-width: 440px; display: flex; flex-direction: column; gap: 24px; padding: 40px; }
+.login-form { display: flex; flex-direction: column; gap: 20px; }
 
-    .btn-cta:disabled {
-      opacity: 0.48;
-      cursor: not-allowed;
-    }
-
-    .btn-ghost {
-      background: var(--surface-2);
-      color: var(--text-2);
-      border: 1px solid var(--border-strong);
-      border-radius: 8px;
-      font-weight: 600;
-      transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease;
-    }
-
-    .btn-ghost:hover:not(:disabled) {
-      background: var(--surface-3);
-      color: var(--text);
-    }
-
-    .btn-ghost:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    .theme-switch {
-      display: inline-flex;
-      padding: 2px;
-      border-radius: 8px;
-      background: var(--surface-2);
-      border: 1px solid var(--border);
-    }
-
-    .theme-switch button {
-      padding: 4px 10px;
-      border-radius: 6px;
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text-3);
-    }
-
-    .theme-switch button[aria-pressed="true"] {
-      background: var(--surface-3);
-      color: var(--text);
-    }
-
-    .preset-chip {
-      border: 1px solid var(--border-strong);
-      background: var(--surface-2);
-      color: var(--text-2);
-      border-radius: 7px;
-      padding: 5px 10px;
-      font-size: 12px;
-      font-weight: 600;
-      transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
-    }
-
-    .preset-chip:hover {
-      background: var(--surface-3);
-      color: var(--text);
-    }
-
-    .preset-chip[aria-pressed="true"] {
-      background: var(--info-soft);
-      border-color: var(--focus);
-      color: var(--text);
-    }
-
-    .kpi-btn {
-      background: var(--surface-2);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 7px 9px;
-      text-align: left;
-      transition: border-color 0.12s ease, background-color 0.12s ease;
-    }
-
-    .kpi-btn:hover {
-      background: var(--surface-3);
-      border-color: var(--border-strong);
-    }
-
-    .kpi-btn[aria-pressed="true"] {
-      background: var(--info-soft);
-      border-color: var(--focus);
-    }
-
-    .filter-pill {
-      padding: 5px 10px;
-      border-radius: 6px;
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text-3);
-      transition: background-color 0.12s ease, color 0.12s ease;
-    }
-
-    .filter-pill:hover {
-      color: var(--text);
-    }
-
-    .filter-pill[aria-pressed="true"] {
-      background: var(--surface-3);
-      color: var(--text);
-    }
-
-    input[type="number"]::-webkit-inner-spin-button,
-    input[type="number"]::-webkit-outer-spin-button {
-      -webkit-appearance: none;
-      margin: 0;
-    }
-
-    input[type="number"] {
-      -moz-appearance: textfield;
-    }
-
-    .muted {
-      color: var(--text-3);
-    }
-
-    .secondary-text {
-      color: var(--text-2);
-    }
-
-    .row-hover:hover {
-      background: var(--surface-2);
-    }
-  </style>
+/* Responsive */
+@media (max-width: 1100px) {
+  .grid-2, .split { grid-template-columns: 1fr; }
+  .kpi-grid { grid-template-columns: repeat(3, 1fr); }
+  .tile-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 720px) {
+  .topbar { padding: 14px 20px; }
+  main.content { padding: 24px 20px 120px; }
+  .panel, .form-card { padding: 24px; }
+  .form-grid, .hash-grid { grid-template-columns: 1fr; }
+  .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+  .ledger-head, .ledger-bar, .pager, .banner { padding-left: 20px; padding-right: 20px; }
+  .nav { overflow-x: auto; max-width: 100%; }
+}
+</style>
 </head>
+<body>
 
-<body class="min-h-screen antialiased">
-
-  <!-- Authentication Screen -->
-  <div id="login-overlay" class="fixed inset-0 z-50 flex flex-col" style="background: var(--bg);">
-    <header class="w-full px-6 py-4 flex items-center justify-between border-b" style="border-color: var(--border);">
-      <div class="flex items-baseline gap-2.5">
-        <span class="text-lg font-bold tracking-tight">MistSan</span>
-        <span class="text-xs muted">Command Center · Station MIST-BOH-01</span>
-      </div>
-      <div class="theme-switch" role="group" aria-label="Theme switcher">
-        <button type="button" data-theme-btn="dark" aria-pressed="true">Dark</button>
-        <button type="button" data-theme-btn="light" aria-pressed="false">Light</button>
-      </div>
-    </header>
-
-    <div class="flex-1 flex items-center justify-center p-6">
-      <div class="panel w-full max-w-md p-7 space-y-5 shadow-2xl">
-        <div class="space-y-1">
-          <p class="text-[11px] uppercase tracking-wider font-semibold muted">PD 856 &amp; RA 10611 Audit Platform</p>
-          <h1 class="text-2xl font-bold tracking-tight">Administrator Authentication</h1>
-          <p class="text-xs secondary-text">Sign in to monitor live sensors, inspect SHA-256 records, and dispatch cycles.</p>
-        </div>
-
-        <div id="login-error" class="hidden rounded-lg px-3.5 py-2.5 text-xs font-medium border"
-          style="background: var(--fail-soft); border-color: var(--fail); color: var(--fail);">
-        </div>
-
-        <form id="login-form" class="space-y-3.5">
-          <div>
-            <label for="login-username" class="block text-xs font-semibold mb-1.5 secondary-text">Username</label>
-            <input id="login-username" type="text" autocomplete="username" required placeholder="admin"
-              class="surface-input w-full px-3.5 py-2.5 text-sm" />
-          </div>
-
-          <div>
-            <label for="login-password" class="block text-xs font-semibold mb-1.5 secondary-text">Password</label>
-            <div class="relative">
-              <input id="login-password" type="password" autocomplete="current-password" required placeholder="••••••••••"
-                class="surface-input w-full px-3.5 py-2.5 pr-16 text-sm" />
-              <button id="toggle-login-password" type="button"
-                class="absolute right-1.5 top-1/2 -translate-y-1/2 px-2.5 py-1 text-xs font-semibold rounded muted hover:text-white">
-                Show
-              </button>
-            </div>
-          </div>
-
-          <button id="login-submit-btn" type="submit" class="btn-cta w-full py-2.5 px-4 text-sm">
-            Sign In to Command Center
-          </button>
-        </form>
-
-        <div class="pt-4 border-t space-y-2" style="border-color: var(--border);">
-          <p class="text-[11px] uppercase tracking-wider muted mono">Quick Demo Credentials</p>
-          <button type="button" onclick="fillDemoCredentials('admin', 'sanmist2026')"
-            class="subpanel w-full px-3 py-2 text-left hover:opacity-90 transition flex items-center justify-between">
-            <span class="text-xs font-semibold" style="color: var(--pass);">Admin Demo</span>
-            <span class="mono text-[11px] muted">admin / sanmist2026</span>
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Safety Confirmation Modal -->
-  <div id="confirm-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4"
-    style="background: var(--overlay);" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title">
-    <div id="confirm-modal-panel" class="panel w-full max-w-md p-6 space-y-4 shadow-2xl">
+<!-- ================= AUTHENTICATION ================= -->
+<div id="login-overlay" class="login-wrap">
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">S</span><span class="brand-name">SanMist Fleet</span></div>
+    <button class="btn-ghost" onclick="toggleColorTheme()" title="Toggle Theme">Theme</button>
+  </header>
+  <div class="login-body">
+    <div class="panel login-card">
       <div>
-        <p class="text-[11px] uppercase tracking-wider font-semibold muted">Pre-Dispatch Safety Verification</p>
-        <h2 id="confirm-modal-title" class="text-xl font-bold mt-0.5">Confirm Sanitization Cycle?</h2>
-        <p class="text-xs secondary-text mt-1">
-          The station will sound a 1-second audible buzzer warning before activating the atomizer.
-        </p>
+        <span class="eyebrow">Secure Access</span>
+        <h1 class="page-title" style="font-size:26px;">Operator Sign In</h1>
+        <p class="sub" style="font-size:12px;margin-top:8px;">Authenticate to monitor real-time stations and schedule fogging cycles.</p>
       </div>
-
-      <dl class="subpanel divide-y text-xs" style="border-color: var(--border);">
-        <div class="flex items-center justify-between px-3.5 py-2.5" style="border-color: var(--border);">
-          <dt class="muted">Station Unit</dt>
-          <dd class="font-semibold mono">MIST-BOH-01 (Prep Station)</dd>
+      <div id="login-error" class="alert tone-fail hidden"></div>
+      <form id="login-form" class="login-form">
+        <div><label class="label">Username</label><input id="login-username" type="text" required placeholder="admin" class="input" /></div>
+        <div><label class="label">Password</label>
+          <div class="pw-wrap">
+            <input id="login-password" type="password" required placeholder="••••••••" class="input" />
+            <button type="button" class="pw-toggle" data-pw-target="login-password" aria-label="Show password">Show</button>
+          </div>
         </div>
-        <div class="flex items-center justify-between px-3.5 py-2.5" style="border-color: var(--border);">
-          <dt class="muted">Misting Duration</dt>
-          <dd id="confirm-duration-val" class="font-semibold mono">32 seconds</dd>
-        </div>
-        <div class="flex items-center justify-between px-3.5 py-2.5" style="border-color: var(--border);">
-          <dt class="muted">Room Volume</dt>
-          <dd id="confirm-volume-val" class="font-semibold mono">1.0 m³</dd>
-        </div>
-        <div class="flex items-center justify-between px-3.5 py-2.5">
-          <dt class="muted">Planning Estimate</dt>
-          <dd id="confirm-estimate-val" class="font-semibold mono">2.880 SEI</dd>
-        </div>
-      </dl>
-
-      <div id="confirm-low-warning" class="hidden rounded-lg px-3.5 py-2.5 text-xs space-y-2 border"
-        style="background: var(--marginal-soft); border-color: var(--marginal);">
-        <p class="font-semibold" style="color: var(--marginal);">
-          Estimated SEI is below the 2.800 PD 856 target.
-        </p>
-        <p class="secondary-text">
-          This cycle may classify as Marginal or Fail and require re-sanitization.
-        </p>
-        <button id="btn-confirm-use-target" type="button" class="btn-ghost px-3 py-1.5 text-xs">
-          Use Suggested Target
-        </button>
-      </div>
-
-      <label for="confirm-area-clear"
-        class="subpanel flex items-start gap-2.5 p-3 cursor-pointer text-xs font-medium select-none">
-        <input id="confirm-area-clear" type="checkbox" class="mt-0.5 h-4 w-4 accent-emerald-500" />
-        <span>I have inspected the prep zone and verified the area is clear of personnel.</span>
-      </label>
-
-      <div class="grid grid-cols-2 gap-2.5 pt-1">
-        <button id="btn-confirm-cancel" type="button" class="btn-ghost py-2.5 px-4 text-sm">
-          Cancel
-        </button>
-        <button id="btn-confirm-dispatch" type="button" class="btn-cta py-2.5 px-4 text-sm" disabled>
-          Start Cycle
+        <button id="login-submit-btn" type="submit" class="btn btn-block">Sign In to Dashboard →</button>
+      </form>
+      <div style="padding-top:20px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:10px;">
+        <span class="tiny-label">Demo Credentials</span>
+        <button type="button" onclick="fillDemoCredentials('admin','sanmist2026')" class="card row-between" style="width:100%;padding:14px 18px;text-align:left;">
+          <span class="tone-pass tone-text" style="font-size:12px;font-weight:600;">Admin Demo</span>
+          <span class="mono muted" style="font-size:12px;">admin / sanmist2026</span>
         </button>
       </div>
     </div>
   </div>
+</div>
 
-  <!-- Full-Screen Command Center Workspace -->
-  <div id="app-shell" class="hidden w-full min-h-screen flex flex-col">
+<!-- ================= FLOATING ACTION BUTTON ================= -->
+<button id="btn-fab-start-cycle" type="button" onclick="openCycleModal()">
+  <span id="fab-indicator-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#10b981;box-shadow:0 0 8px #10b981;"></span>
+  <span id="fab-label-text">Start Cycle</span>
+</button>
 
-    <!-- Sticky Full-Width Top Command Bar -->
-    <header class="sticky top-0 z-30 w-full border-b px-5 py-2.5 flex flex-wrap items-center justify-between gap-3"
-      style="background: var(--surface); border-color: var(--border);">
-      <div class="flex flex-wrap items-center gap-3">
-        <h1 class="text-lg font-bold tracking-tight">MistSan Command Center</h1>
-        <span class="mono text-[11px] px-2 py-0.5 rounded font-semibold subpanel">MIST-BOH-01</span>
+<!-- ================= MANUAL DISPATCH MODAL ================= -->
+<div id="cycle-modal-overlay" class="overlay hidden" role="dialog" aria-modal="true">
+  <div class="panel modal">
+    <div class="modal-head">
+      <div>
+        <h2>Manual Cycle Dispatch</h2>
+        <p class="muted">Immediate MQTT transmission with safety verification.</p>
       </div>
+      <button type="button" onclick="closeCycleModal()" class="icon-btn" aria-label="Close">✕</button>
+    </div>
 
-      <div class="flex flex-wrap items-center gap-2 text-xs">
-        <span class="subpanel px-2.5 py-1.5 secondary-text">
-          Admin: <strong id="header-user" class="font-semibold" style="color: var(--text);">--</strong>
-        </span>
-        <div class="theme-switch" role="group" aria-label="Theme switcher">
-          <button type="button" data-theme-btn="dark" aria-pressed="true">Dark</button>
-          <button type="button" data-theme-btn="light" aria-pressed="false">Light</button>
-        </div>
-        <button id="refresh-btn" type="button" class="btn-ghost px-3 py-1.5 text-xs">
-          Refresh
-        </button>
-        <button id="logout-btn" type="button" class="btn-ghost px-3 py-1.5 text-xs">
-          Sign Out
-        </button>
+    <div id="hocl-low-alert" class="alert tone-fail hidden">
+      <span>⚠️</span>
+      <div>
+        <p style="font-weight:700;">HOCl Disinfectant Reservoir Depleted</p>
+        <p style="font-size:11px;opacity:.85;margin-top:2px;">Refill disinfectant before energizing atomizer relay.</p>
       </div>
-    </header>
+    </div>
 
-    <!-- Full-Width Main Content -->
-    <main class="w-full px-5 py-4 space-y-4 flex-1">
+    <div class="row-between">
+      <span class="sub" style="font-size:12px;">Target SEI Score</span>
+      <span id="sei-estimate-preview" class="chip mono tone-pass">Est. SEI: 2.880 Pass</span>
+    </div>
 
-      <!-- Global Service Error Notice -->
-      <div id="service-error-banner" class="hidden rounded-lg px-4 py-2.5 border flex items-center justify-between gap-3 text-xs"
-        style="background: var(--fail-soft); border-color: var(--fail); color: var(--fail);">
-        <span id="service-error-text">Unable to reach backend service.</span>
-        <button id="btn-retry-fetch" type="button" class="btn-ghost px-2.5 py-1 text-xs">Retry</button>
+    <div class="form-grid">
+      <div>
+        <label class="label" for="input-duration">Duration (Seconds)</label>
+        <input id="input-duration" type="number" min="5" max="300" step="1" value="32" class="input mono" style="font-weight:600;" />
       </div>
-
-      <!-- ROW 1: Above-the-Fold 3-Column Industrial Cockpit -->
-      <section class="grid grid-cols-1 xl:grid-cols-12 gap-4 items-stretch" aria-label="Primary station cockpit">
-
-        <!-- COLUMN 1: Manual Cycle Dispatch + Presets + Live Countdown -->
-        <div id="control" class="xl:col-span-4 panel p-4 flex flex-col justify-between gap-3">
-          <div class="space-y-3">
-            <div class="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h2 class="text-base font-bold leading-tight">Start a Cycle</h2>
-                <p class="text-[11px] muted">Immediate MQTT dispatch with safety confirmation</p>
-              </div>
-              <span id="sei-estimate-preview"
-                class="mono text-[11px] font-semibold px-2.5 py-1 rounded-md border"
-                style="background: var(--pass-soft); border-color: var(--pass); color: var(--pass);">
-                Est. SEI: 2.880 · Pass (≥ 2.800)
-              </span>
-            </div>
-
-            <!-- Inline Controls: Duration Stepper + Direct Room Volume -->
-            <div class="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
-              <div class="sm:col-span-7">
-                <label for="input-duration" class="block text-[11px] uppercase tracking-wider font-semibold muted mb-1">
-                  Duration (sec)
-                </label>
-                <div class="flex items-stretch">
-                  <button id="btn-dur-minus" type="button" aria-label="Decrease duration by 5 seconds"
-                    class="surface-input px-3 font-bold text-base rounded-r-none border-r-0 hover:opacity-80">
-                    −
-                  </button>
-                  <input id="input-duration" type="number" min="5" max="300" step="1" value="32"
-                    class="surface-input w-full px-2.5 py-2 text-base font-semibold mono text-center rounded-none" />
-                  <button id="btn-dur-plus" type="button" aria-label="Increase duration by 5 seconds"
-                    class="surface-input px-3 font-bold text-base rounded-l-none border-l-0 hover:opacity-80">
-                    +
-                  </button>
-                </div>
-              </div>
-
-              <div class="sm:col-span-5">
-                <label for="input-volume" class="block text-[11px] uppercase tracking-wider font-semibold muted mb-1">
-                  Room Size (m³)
-                </label>
-                <div class="relative">
-                  <input id="input-volume" type="number" min="0.1" max="200" step="0.1" value="1.0"
-                    class="surface-input w-full px-3 py-2 pr-9 text-base font-semibold mono text-right" />
-                  <span class="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs muted pointer-events-none">m³</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- Quick Presets + Env Basis -->
-            <div class="space-y-1.5">
-              <div id="preset-chips" class="flex flex-wrap gap-1.5" role="group" aria-label="Quick duration presets">
-              </div>
-              <p id="sei-env-basis" class="mono text-[11px] muted">
-                Env basis: 25.0°C · 65% RH · 30.0 mL/min (nominal)
-              </p>
-            </div>
-          </div>
-
-          <!-- Active Cycle Progress Panel (shown during dispatch countdown) -->
-          <div id="cycle-progress-panel" class="hidden subpanel p-3 space-y-2">
-            <div class="flex items-center justify-between text-xs gap-2">
-              <span id="cycle-phase-label" class="font-semibold" style="color: var(--pass);">Pre-Cycle Warning Active</span>
-              <span id="cycle-countdown" class="mono font-bold">--s remaining</span>
-            </div>
-            <div class="w-full h-2 rounded-full overflow-hidden" style="background: var(--surface-3);">
-              <div id="cycle-progress-bar" class="h-full transition-all duration-200 rounded-full"
-                style="width: 0%; background: var(--primary);"></div>
-            </div>
-            <div id="cycle-overdue-controls" class="hidden flex items-center justify-between gap-2 pt-1 text-[11px]">
-              <span class="muted">Awaiting telemetry confirmation from station…</span>
-              <div class="flex items-center gap-1.5">
-                <button id="btn-cycle-check" type="button" class="btn-ghost px-2.5 py-1 text-[11px]">Check Now</button>
-                <button id="btn-cycle-reset" type="button" class="btn-ghost px-2.5 py-1 text-[11px]">Clear</button>
-              </div>
-            </div>
-          </div>
-
-          <!-- Always-Visible Primary Dispatch Button -->
-          <div class="space-y-1.5 pt-1">
-            <button id="btn-open-confirm" type="button" class="btn-cta w-full py-2.5 px-4 text-sm tracking-wide">
-              Review &amp; Start Cycle
-            </button>
-            <p id="trigger-feedback" class="hidden mono text-[11px]"></p>
-            <p id="dispatch-helper-text" class="text-[11px] muted text-center">
-              Opens safety confirmation before energizing atomizer.
-            </p>
-          </div>
+      <div>
+        <label class="label" for="input-volume">Room Volume</label>
+        <div class="input-unit">
+          <input id="input-volume" type="number" min="0.1" max="200" step="0.1" value="1.0" class="input mono" style="font-weight:600;" />
+          <span class="unit">m³</span>
         </div>
+      </div>
+    </div>
 
-        <!-- COLUMN 2: Last Cycle Outcome + Visual SEI Scale + 6-Cell KPI Filter Strip -->
-        <div class="xl:col-span-4 panel p-4 flex flex-col justify-between gap-3">
-          <div class="space-y-2.5">
-            <div class="flex items-center justify-between gap-2">
-              <div class="flex items-center gap-2">
-                <span class="text-[11px] uppercase tracking-wider font-semibold muted">Last Cycle</span>
-                <span id="stat-station" class="mono text-xs font-semibold px-2 py-0.5 rounded subpanel">MIST-BOH-01</span>
-              </div>
-              <span id="stat-outcome-badge"
-                class="mono text-[11px] font-semibold px-2.5 py-0.5 rounded-full border"
-                style="background: var(--surface-2); border-color: var(--border-strong); color: var(--text-2);">
-                INITIALIZING
-              </span>
-            </div>
+    <p id="sei-env-basis" class="mono muted" style="font-size:10px;margin-top:-8px;">Env basis: 25.0°C • 65% RH • 30.0 mL/min (live telemetry)</p>
 
-            <div>
-              <h2 id="stat-headline" class="text-lg font-bold leading-snug">Waiting for cycle records…</h2>
-              <p id="stat-guidance" class="text-xs secondary-text mt-0.5">
-                The most recent ML-audited cycle will appear here.
-              </p>
-            </div>
+    <div id="cycle-progress-panel" class="card hidden">
+      <div class="row-between" style="font-size:12px;">
+        <span id="cycle-phase-label" class="tone-pass tone-text" style="font-weight:600;">Pre-Cycle Warning Active</span>
+        <span id="cycle-countdown" class="mono" style="font-weight:700;">--s left</span>
+      </div>
+      <div class="progress"><div id="cycle-progress-bar"></div></div>
+    </div>
 
-            <!-- Outcome Fact Grid -->
-            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-xs">
-              <div class="subpanel px-2.5 py-2">
-                <div class="text-[10px] uppercase muted">Last Time (PHT)</div>
-                <div id="stat-last-time" class="mono font-semibold mt-0.5 truncate">--:--:--</div>
-              </div>
-              <div class="subpanel px-2.5 py-2">
-                <div class="text-[10px] uppercase muted">Efficacy</div>
-                <div id="stat-efficacy" class="font-bold mt-0.5 truncate">--</div>
-              </div>
-              <div class="subpanel px-2.5 py-2">
-                <div class="text-[10px] uppercase muted">Confidence</div>
-                <div id="stat-confidence" class="mono font-semibold mt-0.5 truncate">--</div>
-              </div>
-              <div class="subpanel px-2.5 py-2">
-                <div class="text-[10px] uppercase muted">Safety</div>
-                <div id="stat-safety" class="font-semibold mt-0.5 truncate">--</div>
-              </div>
-            </div>
-
-            <!-- Visual SEI Threshold Scale -->
-            <div class="subpanel p-3 space-y-1.5">
-              <div class="flex items-center justify-between text-xs">
-                <span class="secondary-text font-medium">Latest SEI Score · Target ≥ 2.800</span>
-                <span id="stat-sei" class="mono text-base font-bold" style="color: var(--sei);">--</span>
-              </div>
-              <div class="relative h-2.5 w-full rounded-full overflow-hidden" style="background: var(--surface-3);">
-                <div id="sei-gauge-bar" class="h-full rounded-full transition-all duration-300"
-                  style="width: 0%; background: var(--sei);"></div>
-                <div class="absolute top-0 bottom-0 w-0.5" style="left: 45%; background: var(--marginal);"
-                  title="Marginal Threshold (1.800)"></div>
-                <div class="absolute top-0 bottom-0 w-0.5" style="left: 70%; background: var(--pass);"
-                  title="PD 856 Pass Threshold (2.800)"></div>
-              </div>
-              <div class="relative flex justify-between text-[10px] mono muted">
-                <span>0.0</span>
-                <span style="position: absolute; left: 45%; transform: translateX(-50%); color: var(--marginal);">1.800</span>
-                <span style="position: absolute; left: 70%; transform: translateX(-50%); color: var(--pass);">2.800</span>
-                <span>4.0+</span>
-              </div>
-              <div id="stat-compliance" class="mono text-[11px] muted">Compliance: --</div>
-            </div>
-          </div>
-
-          <!-- 6-Cell Interactive KPI Strip -->
-          <div class="grid grid-cols-3 sm:grid-cols-6 gap-1.5" role="group" aria-label="Cycle KPI breakdown and filters">
-            <button type="button" class="kpi-btn" data-kpi-filter="all" aria-pressed="true">
-              <div class="text-[10px] uppercase muted">Total</div>
-              <div id="stat-cycles" class="mono text-sm font-bold">0</div>
-            </button>
-            <div class="subpanel px-2 py-1.5 text-left">
-              <div class="text-[10px] uppercase muted">Pass Rate</div>
-              <div id="stat-pass-rate" class="mono text-sm font-bold" style="color: var(--pass);">0.0%</div>
-            </div>
-            <button type="button" class="kpi-btn" data-kpi-filter="pass" aria-pressed="false">
-              <div class="text-[10px] uppercase" style="color: var(--pass);">Pass</div>
-              <div id="count-pass" class="mono text-sm font-bold">0</div>
-            </button>
-            <button type="button" class="kpi-btn" data-kpi-filter="marginal" aria-pressed="false">
-              <div class="text-[10px] uppercase" style="color: var(--marginal);">Marginal</div>
-              <div id="count-marginal" class="mono text-sm font-bold">0</div>
-            </button>
-            <button type="button" class="kpi-btn" data-kpi-filter="fail" aria-pressed="false">
-              <div class="text-[10px] uppercase" style="color: var(--fail);">Fail</div>
-              <div id="count-fail" class="mono text-sm font-bold">0</div>
-            </button>
-            <button type="button" class="kpi-btn" data-kpi-filter="e-stop" aria-pressed="false">
-              <div class="text-[10px] uppercase" style="color: var(--estop);">E-Stop</div>
-              <div id="count-estop" class="mono text-sm font-bold">0</div>
-            </button>
-          </div>
-        </div>
-
-        <!-- COLUMN 3: Live Sensor Readings + Station/MQTT/Ledger Connection Status -->
-        <div class="xl:col-span-4 panel p-4 flex flex-col justify-between gap-3">
-          <!-- Latest Readings Sub-Section -->
-          <div class="space-y-2">
-            <div class="flex items-center justify-between gap-2">
-              <h2 class="text-base font-bold leading-tight">Latest Readings</h2>
-              <span id="sensor-source-badge"
-                class="mono text-[10px] font-semibold px-2 py-0.5 rounded border"
-                style="background: var(--surface-2); border-color: var(--border-strong); color: var(--text-3);">
-                WAITING
-              </span>
-            </div>
-
-            <div class="grid grid-cols-2 gap-2">
-              <div class="subpanel px-3 py-2 flex items-center justify-between gap-2">
-                <div>
-                  <div class="text-[10px] uppercase tracking-wider muted">Ambient Temp</div>
-                  <div id="sensor-temp" class="mono text-base font-bold mt-0.5" style="color: var(--sensor-temp);">-- °C</div>
-                </div>
-                <span class="mono text-[10px] muted">DHT22</span>
-              </div>
-
-              <div class="subpanel px-3 py-2 flex items-center justify-between gap-2">
-                <div>
-                  <div class="text-[10px] uppercase tracking-wider muted">Rel. Humidity</div>
-                  <div id="sensor-hum" class="mono text-base font-bold mt-0.5" style="color: var(--sensor-hum);">-- %</div>
-                </div>
-                <span class="mono text-[10px] muted">DHT22</span>
-              </div>
-
-              <div class="subpanel px-3 py-2 flex items-center justify-between gap-2">
-                <div>
-                  <div class="text-[10px] uppercase tracking-wider muted">Atomizer Flow</div>
-                  <div id="sensor-flow" class="mono text-base font-bold mt-0.5" style="color: var(--sensor-flow);">-- mL/min</div>
-                </div>
-                <span class="mono text-[10px] muted">YF-S401</span>
-              </div>
-
-              <div class="subpanel px-3 py-2 flex items-center justify-between gap-2">
-                <div>
-                  <div class="text-[10px] uppercase tracking-wider muted">Last Spec</div>
-                  <div id="sensor-dur-vol" class="mono text-sm font-bold mt-0.5">--s / -- m³</div>
-                </div>
-                <span class="mono text-[10px] muted">SPEC</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Connection & Cryptographic Integrity Sub-Section -->
-          <div class="subpanel p-3 space-y-2 text-xs">
-            <div class="flex items-center justify-between border-b pb-1.5" style="border-color: var(--border);">
-              <h3 class="font-bold text-xs uppercase tracking-wider secondary-text">Connection &amp; Integrity</h3>
-              <span id="last-updated" class="mono text-[11px] muted">Connecting…</span>
-            </div>
-
-            <dl class="space-y-1.5">
-              <div class="flex items-center justify-between gap-2">
-                <dt class="muted">Station Heartbeat</dt>
-                <dd id="conn-station" class="mono font-semibold text-right">Unknown · no heartbeat</dd>
-              </div>
-              <div class="flex items-center justify-between gap-2">
-                <dt class="muted">MistSan API Service</dt>
-                <dd id="conn-service" class="mono font-semibold text-right">Checking…</dd>
-              </div>
-              <div class="flex items-center justify-between gap-2">
-                <dt class="muted">MQTT (<span class="mono">broker.emqx.io</span>)</dt>
-                <dd id="broker-status" class="mono font-semibold text-right">Checking…</dd>
-              </div>
-              <div class="flex items-center justify-between gap-2">
-                <dt class="muted">SHA-256 Ledger</dt>
-                <dd id="ledger-integrity-badge" class="mono font-semibold text-right">Pending</dd>
-              </div>
-            </dl>
-          </div>
-        </div>
-      </section>
-
-      <!-- ROW 2: Full-Width Tamper-Evident Audit Ledger Table -->
-      <section class="panel overflow-hidden" aria-label="Compliance audit ledger">
-        <div class="px-5 py-3.5 border-b flex flex-col lg:flex-row lg:items-center justify-between gap-3"
-          style="border-color: var(--border);">
-          <div>
-            <h2 class="text-base font-bold">Immutable Compliance Audit Ledger</h2>
-            <p class="text-xs muted">
-              Auto-refreshes every 3 seconds · Click any row to inspect full SHA-256 hash linkage
-            </p>
-          </div>
-
-          <div class="flex flex-wrap items-center gap-2">
-            <input id="search-input" type="search" placeholder="Search station, ID, status…"
-              class="surface-input px-3 py-1.5 text-xs w-56" aria-label="Search audit records" />
-
-            <div id="status-filter-group" class="subpanel p-1 flex flex-wrap items-center gap-0.5"
-              role="group" aria-label="Filter records by efficacy">
-              <button type="button" data-status="all" class="filter-pill" aria-pressed="true">All</button>
-              <button type="button" data-status="pass" class="filter-pill" aria-pressed="false">Pass</button>
-              <button type="button" data-status="marginal" class="filter-pill" aria-pressed="false">Marginal</button>
-              <button type="button" data-status="fail" class="filter-pill" aria-pressed="false">Fail</button>
-              <button type="button" data-status="e-stop" class="filter-pill" aria-pressed="false">E-Stop</button>
-            </div>
-
-            <button id="verify-ledger-btn" type="button"
-              class="px-3 py-1.5 rounded-lg text-xs font-semibold border transition"
-              style="background: var(--sei-soft); border-color: var(--sei); color: var(--sei);">
-              Verify Ledger Chain
-            </button>
-
-            <button id="export-csv-btn" type="button" class="btn-ghost px-3 py-1.5 text-xs">
-              Export CSV
-            </button>
-          </div>
-        </div>
-
-        <div id="ledger-verify-banner" class="hidden px-5 py-2.5 border-b text-xs"
-          style="border-color: var(--border);"></div>
-
-        <div class="overflow-x-auto">
-          <table class="w-full text-left text-xs border-collapse">
-            <thead class="uppercase mono text-[11px]" style="background: var(--surface-2); color: var(--text-3);">
-              <tr class="border-b" style="border-color: var(--border);">
-                <th class="px-4 py-2.5">ID</th>
-                <th class="px-4 py-2.5">Timestamp (PHT)</th>
-                <th class="px-4 py-2.5">Station</th>
-                <th class="px-4 py-2.5">Temp / Hum</th>
-                <th class="px-4 py-2.5">Flow Rate</th>
-                <th class="px-4 py-2.5">Duration / Vol</th>
-                <th class="px-4 py-2.5">SEI Score</th>
-                <th class="px-4 py-2.5">Prediction</th>
-                <th class="px-4 py-2.5">Safety Status</th>
-                <th class="px-4 py-2.5">SHA-256 Hash</th>
-              </tr>
-            </thead>
-            <tbody id="table-body" class="divide-y" style="border-color: var(--border);">
-              <tr>
-                <td colspan="10" class="px-5 py-8 text-center muted">
-                  Sign in to load audit records…
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div id="ledger-pagination" class="px-5 py-3 border-t flex flex-wrap items-center justify-between gap-3 text-xs"
-          style="border-color: var(--border); background: var(--surface-2);">
-          <span id="pagination-summary" class="mono muted">Showing 0 of 0 records</span>
-          <div class="flex flex-wrap items-center gap-2">
-            <label for="page-size-select" class="muted">Rows:</label>
-            <select id="page-size-select" class="surface-input px-2 py-1 text-xs mono" aria-label="Rows per page">
-              <option value="10" selected>10</option>
-              <option value="25">25</option>
-              <option value="50">50</option>
-            </select>
-            <button id="btn-page-prev" type="button" class="btn-ghost px-2.5 py-1 text-xs" disabled>Prev</button>
-            <span id="pagination-page-label" class="mono secondary-text px-1">Page 1 of 1</span>
-            <button id="btn-page-next" type="button" class="btn-ghost px-2.5 py-1 text-xs" disabled>Next</button>
-          </div>
-        </div>
-      </section>
-    </main>
+    <div class="btn-row">
+      <button id="btn-open-confirm" type="button" class="btn btn-block">Review &amp; Start Cycle →</button>
+      <button id="btn-ui-estop" type="button" class="estop-btn" onclick="triggerUiEmergencyStop()" aria-disabled="true">
+        <span id="estop-indicator-dot" class="dot"></span>
+        <span id="estop-btn-label">EMERGENCY STOP (ABORT)</span>
+      </button>
+    </div>
   </div>
-
-  <script>
-    const API_BASE = window.location.hostname
-      ? `http://${window.location.hostname}:8000`
-      : "http://localhost:8000";
-
-    const TOKEN_KEY = "sanmist_auth_token";
-    const THEME_KEY = "mistsan_theme";
-    const SEI_TARGET = 2.8;
-    const STALE_AFTER_MS = 15000;
-
-    let pollTimer = null;
-    let countdownTimer = null;
-    let activeStatusFilter = "all";
-    let currentRecords = [];
-    let currentPage = 1;
-    let pageSize = 10;
-    let totalFilteredRecords = 0;
-    let liveSensorState = null;
-    let latestRecord = null;
-    let activeCycle = null;
-    let lastReceivedAt = null;
-    let isDispatching = false;
-    const expandedRecordIds = new Set();
-
-    function escapeHtml(value) {
-      return String(value ?? "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
-    }
-
-    function applyTheme(theme) {
-      const normalized = theme === "light" ? "light" : "dark";
-      document.documentElement.dataset.theme = normalized;
-      document.querySelectorAll("[data-theme-btn]").forEach((btn) => {
-        btn.setAttribute("aria-pressed", btn.dataset.themeBtn === normalized ? "true" : "false");
-      });
-      try {
-        localStorage.setItem(THEME_KEY, normalized);
-      } catch {
-        // Ignore storage errors
-      }
-    }
-
-    function initTheme() {
-      try {
-        const saved = localStorage.getItem(THEME_KEY);
-        applyTheme(saved === "light" ? "light" : "dark");
-      } catch {
-        applyTheme("dark");
-      }
-    }
-
-    // Exact 1:1 mirror of backend compute_evaporation_adjusted_sei:
-    // uses live DHT22 temp/hum + live flow_rate_ml_min when streaming, else 25.0C / 65% RH / 30.0 mL/min nominal.
-    function computeSeiLossFactor(env) {
-      const temp = Number.isFinite(env?.temp) ? env.temp : 25.0;
-      const hum = Number.isFinite(env?.hum) ? env.hum : 65.0;
-      const evapLoss = (temp - 25.0) * 0.003 - (hum - 65.0) * 0.001;
-      return Math.max(0.85, Math.min(1.15, 1.0 - evapLoss));
-    }
-
-    function estimateSei(duration, volume, env) {
-      if (!Number.isFinite(duration) || !Number.isFinite(volume) || duration <= 0 || volume <= 0) {
-        return null;
-      }
-      const flow = Number.isFinite(env?.flow) && env.flow > 0 ? env.flow : 30.0;
-      const lossFactor = computeSeiLossFactor(env);
-      const effectiveFlow = flow * lossFactor;
-      const durationMin = duration / 60.0;
-      return Math.round(((effectiveFlow * durationMin) / volume) * 1000) / 1000;
-    }
-
-    function suggestedDuration(volume, env) {
-      if (!Number.isFinite(volume) || volume <= 0) return null;
-      const flow = Number.isFinite(env?.flow) && env.flow > 0 ? env.flow : 30.0;
-      const lossFactor = computeSeiLossFactor(env);
-      const perSec = ((flow * lossFactor) / 60.0) / volume;
-      let sec = Math.max(5, Math.ceil(SEI_TARGET / perSec - 1e-9));
-      while (sec <= 300 && estimateSei(sec, volume, env) < SEI_TARGET) {
-        sec += 1;
-      }
-      return sec <= 300 ? sec : null;
-    }
-
-    function durationPresets(volume, env) {
-      const target = suggestedDuration(volume, env);
-      const standard = [45, 60, 90, 120].filter((sec) => sec !== target);
-      const presets = target !== null ? [{ seconds: target, isTarget: true }] : [];
-      for (const seconds of standard) {
-        if (presets.length >= 4) break;
-        presets.push({ seconds, isTarget: false });
-      }
-      return presets;
-    }
-
-    function getToken() {
-      return localStorage.getItem(TOKEN_KEY);
-    }
-
-    function setToken(token) {
-      localStorage.setItem(TOKEN_KEY, token);
-    }
-
-    function clearToken() {
-      localStorage.removeItem(TOKEN_KEY);
-    }
-
-    function stopPolling() {
-      if (pollTimer) {
-        clearInterval(pollTimer);
-        pollTimer = null;
-      }
-    }
-
-    function startPolling() {
-      stopPolling();
-      pollTimer = setInterval(refreshDashboard, 3000);
-    }
-
-    function formatTruncatedHash(hash) {
-      const raw = String(hash ?? "").trim();
-      if (!raw) return "--";
-      if (raw.length <= 16) return raw;
-      return `${raw.slice(0, 8)}…${raw.slice(-6)}`;
-    }
-
-    function formatManilaTime(rawTimestamp) {
-      if (!rawTimestamp) return "--:--:--";
-      let isoStr = String(rawTimestamp);
-      if (!isoStr.endsWith("Z") && !isoStr.includes("+")) {
-        isoStr += "Z";
-      }
-      const dateObj = new Date(isoStr);
-      return isNaN(dateObj.getTime())
-        ? String(rawTimestamp)
-        : dateObj.toLocaleTimeString("en-US", {
-            timeZone: "Asia/Manila",
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-            hour12: true,
-          });
-    }
-
-    function dismissLedgerBanner() {
-      const banner = document.getElementById("ledger-verify-banner");
-      if (banner) {
-        banner.classList.add("hidden");
-        delete banner.dataset.state;
-      }
-    }
-
-    function updateLedgerIntegrityBadge(isVerified, latestHash) {
-      const badge = document.getElementById("ledger-integrity-badge");
-      if (!badge) return;
-
-      const cleanHash = String(latestHash ?? "").trim();
-      const shortHash = formatTruncatedHash(cleanHash);
-      badge.title = cleanHash ? `Latest SHA-256: ${cleanHash}` : "No hash chain records yet";
-
-      if (isVerified === true) {
-        badge.style.color = "var(--pass)";
-        badge.textContent = cleanHash ? `Verified (${shortHash})` : "Verified";
-      } else if (isVerified === false) {
-        badge.style.color = "var(--fail)";
-        badge.textContent = "Tamper Alert!";
-      } else {
-        badge.style.color = "var(--text-3)";
-        badge.textContent = "Pending";
-      }
-    }
-
-    function updateConnectionPanel(stats, apiReachable) {
-      const stationEl = document.getElementById("conn-station");
-      const serviceEl = document.getElementById("conn-service");
-      const brokerEl = document.getElementById("broker-status");
-      const updatedEl = document.getElementById("last-updated");
-
-      if (serviceEl) {
-        serviceEl.style.color = apiReachable ? "var(--pass)" : "var(--fail)";
-        serviceEl.textContent = apiReachable ? "Reachable" : "Unavailable";
-      }
-
-      if (brokerEl) {
-        if (!stats || typeof stats.mqtt_connected !== "boolean") {
-          brokerEl.style.color = "var(--text-3)";
-          brokerEl.textContent = "Status unknown";
-        } else if (stats.mqtt_connected) {
-          brokerEl.style.color = "var(--pass)";
-          brokerEl.textContent = "Connected";
-        } else {
-          brokerEl.style.color = "var(--fail)";
-          brokerEl.textContent = "Disconnected";
-        }
-      }
-
-      if (stationEl) {
-        if (!apiReachable) {
-          stationEl.style.color = "var(--fail)";
-          stationEl.textContent = "Unknown · service down";
-        } else if (stats?.live_telemetry?.updated_at) {
-          const updatedMs = new Date(stats.live_telemetry.updated_at).getTime();
-          const ageMs = Number.isNaN(updatedMs) ? Number.POSITIVE_INFINITY : Math.max(0, Date.now() - updatedMs);
-          if (ageMs <= STALE_AFTER_MS * 2) {
-            stationEl.style.color = "var(--pass)";
-            stationEl.textContent = stats.live_telemetry.cycle_in_progress
-              ? "Online · misting active"
-              : "Online · live telemetry";
-          } else {
-            stationEl.style.color = "var(--marginal)";
-            stationEl.textContent = "Standby · telemetry idle";
-          }
-        } else {
-          stationEl.style.color = "var(--text-3)";
-          stationEl.textContent = "Unknown · no heartbeat";
-        }
-      }
-
-      if (updatedEl) {
-        updatedEl.textContent = lastReceivedAt
-          ? `Polled ${new Date(lastReceivedAt).toLocaleTimeString()}`
-          : "Waiting…";
-      }
-    }
-
-    function renderPresetChips(currentDuration, volume) {
-      const container = document.getElementById("preset-chips");
-      if (!container) return;
-      const presets = durationPresets(volume, liveSensorState);
-      container.innerHTML = presets
-        .map((preset) => {
-          const pressed = currentDuration === preset.seconds ? "true" : "false";
-          const label = preset.isTarget ? `Target · ${preset.seconds}s` : `${preset.seconds}s`;
-          return `<button type="button" class="preset-chip mono" data-preset-sec="${preset.seconds}" aria-pressed="${pressed}">${label}</button>`;
-        })
-        .join("");
-
-      container.querySelectorAll("[data-preset-sec]").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          const sec = parseInt(btn.dataset.presetSec, 10);
-          if (Number.isFinite(sec)) {
-            document.getElementById("input-duration").value = String(sec);
-            updateSeiEstimatePreview();
-          }
-        });
-      });
-    }
-
-    function updateSeiEstimatePreview() {
-      const previewEl = document.getElementById("sei-estimate-preview");
-      const basisEl = document.getElementById("sei-env-basis");
-      const helperEl = document.getElementById("dispatch-helper-text");
-      const openBtn = document.getElementById("btn-open-confirm");
-      const durationEl = document.getElementById("input-duration");
-      const volumeEl = document.getElementById("input-volume");
-      if (!previewEl || !durationEl || !volumeEl) return;
-
-      const duration = parseInt(durationEl.value, 10);
-      const volume = parseFloat(volumeEl.value);
-      const validDuration = Number.isInteger(duration) && duration >= 5 && duration <= 300;
-      const validVolume = Number.isFinite(volume) && volume >= 0.1 && volume <= 200;
-
-      if (basisEl) {
-        if (liveSensorState) {
-          basisEl.textContent = `Env basis: ${liveSensorState.temp.toFixed(1)}°C · ${liveSensorState.hum.toFixed(0)}% RH · ${liveSensorState.flow.toFixed(1)} mL/min (live)`;
-        } else {
-          basisEl.textContent = "Env basis: 25.0°C · 65% RH · 30.0 mL/min (nominal)";
-        }
-      }
-
-      renderPresetChips(validDuration ? duration : null, validVolume ? volume : 1.0);
-
-      if (!validDuration || !validVolume) {
-        previewEl.style.background = "var(--surface-2)";
-        previewEl.style.borderColor = "var(--border-strong)";
-        previewEl.style.color = "var(--text-3)";
-        previewEl.textContent = "Est. SEI: -- · Invalid inputs";
-        if (openBtn) openBtn.disabled = true;
-        if (helperEl) {
-          helperEl.style.color = "var(--fail)";
-          helperEl.textContent = "Enter duration 5–300s and room volume 0.1–200 m³.";
-        }
-        return;
-      }
-
-      if (openBtn) openBtn.disabled = isDispatching;
-      const estSei = estimateSei(duration, volume, liveSensorState);
-      const formattedSei = estSei.toFixed(3);
-      const suggestion = suggestedDuration(volume, liveSensorState);
-
-      if (estSei >= 2.8) {
-        previewEl.style.background = "var(--pass-soft)";
-        previewEl.style.borderColor = "var(--pass)";
-        previewEl.style.color = "var(--pass)";
-        previewEl.textContent = `Est. SEI: ${formattedSei} · Pass (≥ 2.800)`;
-        if (helperEl) {
-          helperEl.style.color = "var(--text-3)";
-          helperEl.textContent = "Opens safety confirmation before energizing atomizer.";
-        }
-      } else if (estSei >= 1.8) {
-        previewEl.style.background = "var(--marginal-soft)";
-        previewEl.style.borderColor = "var(--marginal)";
-        previewEl.style.color = "var(--marginal)";
-        previewEl.textContent = `Est. SEI: ${formattedSei} · Marginal (< 2.800)`;
-        if (helperEl) {
-          helperEl.style.color = "var(--marginal)";
-          helperEl.textContent = suggestion
-            ? `Below 2.800 target — ${suggestion}s recommended for ${volume.toFixed(1)} m³.`
-            : "Below 2.800 target even at 300s maximum.";
-        }
-      } else {
-        previewEl.style.background = "var(--fail-soft)";
-        previewEl.style.borderColor = "var(--fail)";
-        previewEl.style.color = "var(--fail)";
-        previewEl.textContent = `Est. SEI: ${formattedSei} · Fail (< 1.800)`;
-        if (helperEl) {
-          helperEl.style.color = "var(--fail)";
-          helperEl.textContent = suggestion
-            ? `Below 2.800 target — ${suggestion}s recommended for ${volume.toFixed(1)} m³.`
-            : "Below target SEI.";
-        }
-      }
-    }
-
-    function updateLiveSensorStrip(liveTelemetry) {
-      if (!liveTelemetry) return;
-      const temp = Number(liveTelemetry.ambient_temp_c);
-      const hum = Number(liveTelemetry.relative_humidity_pct);
-      const flow = Number(liveTelemetry.flow_rate_ml_min);
-
-      liveSensorState = {
-        temp: Number.isFinite(temp) ? temp : 25.0,
-        hum: Number.isFinite(hum) ? hum : 65.0,
-        flow: Number.isFinite(flow) ? flow : 30.0,
-      };
-
-      document.getElementById("sensor-temp").textContent = `${liveSensorState.temp.toFixed(1)} °C`;
-      document.getElementById("sensor-hum").textContent = `${liveSensorState.hum.toFixed(1)} %`;
-      document.getElementById("sensor-flow").textContent = `${liveSensorState.flow.toFixed(1)} mL/min`;
-
-      const srcBadge = document.getElementById("sensor-source-badge");
-      if (srcBadge) {
-        srcBadge.style.background = "var(--pass-soft)";
-        srcBadge.style.borderColor = "var(--pass)";
-        srcBadge.style.color = "var(--pass)";
-        srcBadge.textContent = "LIVE STREAM";
-      }
-
-      updateSeiEstimatePreview();
-    }
-
-    function showLoginOverlay(message = "") {
-      stopPolling();
-      liveSensorState = null;
-      latestRecord = null;
-      activeCycle = null;
-      lastReceivedAt = null;
-      closeConfirmModal(true);
-      dismissLedgerBanner();
-      updateLedgerIntegrityBadge(undefined, "");
-      document.getElementById("app-shell").classList.add("hidden");
-      document.getElementById("login-overlay").classList.remove("hidden");
-      const errBox = document.getElementById("login-error");
-      if (message) {
-        errBox.textContent = message;
-        errBox.classList.remove("hidden");
-      } else {
-        errBox.classList.add("hidden");
-      }
-    }
-
-    function showDashboard(user) {
-      document.getElementById("login-overlay").classList.add("hidden");
-      document.getElementById("app-shell").classList.remove("hidden");
-      document.getElementById("header-user").textContent = `${user.full_name} (${user.role})`;
-    }
-
-    function fillDemoCredentials(username, password) {
-      document.getElementById("login-username").value = username;
-      document.getElementById("login-password").value = password;
-      document.getElementById("login-error").classList.add("hidden");
-    }
-
-    async function authFetch(path, options = {}) {
-      const token = getToken();
-      if (!token) {
-        showLoginOverlay("Please sign in to access the dashboard.");
-        throw new Error("Unauthenticated");
-      }
-
-      const headers = new Headers(options.headers || {});
-      headers.set("Authorization", `Bearer ${token}`);
-
-      const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
-      if (res.status === 401) {
-        clearToken();
-        showLoginOverlay("Session expired or unauthorized. Please sign in again.");
-        throw new Error("Unauthorized");
-      }
-      return res;
-    }
-
-    function getBadge(row) {
-      const isEstop = Boolean(row.estop_triggered) || row.compliance_status === "SAFETY INTERLOCK TRIPPED";
-      const predClass = Number(row.predicted_class);
-      const label = String(row.efficacy_label ?? "").toLowerCase();
-      const hasConfidence =
-        row.ml_confidence != null &&
-        row.ml_confidence !== "" &&
-        Number.isFinite(Number(row.ml_confidence));
-      const confSuffix = hasConfidence ? ` (${escapeHtml(Number(row.ml_confidence).toFixed(1))}%)` : "";
-
-      if (isEstop) {
-        return `<span class="px-2 py-0.5 rounded-full text-[11px] font-semibold border" style="background: var(--estop-soft); border-color: var(--estop); color: var(--estop);">HALTED (E-STOP)</span>`;
-      }
-      if (label === "pass" || predClass === 2) {
-        return `<span class="px-2 py-0.5 rounded-full text-[11px] font-semibold border" style="background: var(--pass-soft); border-color: var(--pass); color: var(--pass);">PASS${confSuffix}</span>`;
-      }
-      if (label === "marginal" || predClass === 1) {
-        return `<span class="px-2 py-0.5 rounded-full text-[11px] font-semibold border" style="background: var(--marginal-soft); border-color: var(--marginal); color: var(--marginal);">MARGINAL${confSuffix}</span>`;
-      }
-      return `<span class="px-2 py-0.5 rounded-full text-[11px] font-semibold border" style="background: var(--fail-soft); border-color: var(--fail); color: var(--fail);">FAIL${confSuffix}</span>`;
-    }
-
-    function updateSeiGauge(seiScore, isEstop) {
-      const gaugeBar = document.getElementById("sei-gauge-bar");
-      if (!gaugeBar) return;
-      const clampedPct = isEstop ? 0 : Math.max(0, Math.min(100, (seiScore / 4.0) * 100));
-      gaugeBar.style.width = `${clampedPct.toFixed(1)}%`;
-
-      if (isEstop || seiScore < 1.8) {
-        gaugeBar.style.background = "var(--fail)";
-      } else if (seiScore < 2.8) {
-        gaugeBar.style.background = "var(--marginal)";
-      } else {
-        gaugeBar.style.background = "var(--pass)";
-      }
-    }
-
-    function updateSummaryCards(latest) {
-      if (!latest) return;
-
-      const latestSei = Number(latest.sei_score) || 0;
-      const isEstop = Boolean(latest.estop_triggered) || latest.compliance_status === "SAFETY INTERLOCK TRIPPED";
-      const labelLower = String(latest.efficacy_label ?? "").toLowerCase();
-      const isPass = !isEstop && (labelLower === "pass" || Number(latest.predicted_class) === 2);
-      const isMarginal = !isEstop && (labelLower === "marginal" || Number(latest.predicted_class) === 1);
-      const hasConfidence =
-        latest.ml_confidence != null &&
-        latest.ml_confidence !== "" &&
-        Number.isFinite(Number(latest.ml_confidence));
-
-      document.getElementById("stat-station").textContent = latest.station_id || "MIST-BOH-01";
-      document.getElementById("stat-last-time").textContent = formatManilaTime(latest.timestamp);
-      document.getElementById("stat-sei").textContent = latestSei.toFixed(3);
-      document.getElementById("stat-confidence").textContent =
-        hasConfidence ? `${Number(latest.ml_confidence).toFixed(1)}%` : "Rule Check";
-      document.getElementById("stat-safety").textContent = isEstop ? "E-Stop Active" : "Normal Delivery";
-      document.getElementById("stat-safety").style.color = isEstop ? "var(--estop)" : "var(--pass)";
-
-      updateSeiGauge(latestSei, isEstop);
-
-      const badgeEl = document.getElementById("stat-outcome-badge");
-      const headlineEl = document.getElementById("stat-headline");
-      const guidanceEl = document.getElementById("stat-guidance");
-      const effEl = document.getElementById("stat-efficacy");
-      const compEl = document.getElementById("stat-compliance");
-
-      if (isEstop) {
-        badgeEl.style.background = "var(--estop-soft)";
-        badgeEl.style.borderColor = "var(--estop)";
-        badgeEl.style.color = "var(--estop)";
-        badgeEl.textContent = "HALTED · E-STOP";
-        headlineEl.textContent = "Last cycle halted by E-Stop";
-        guidanceEl.textContent = "Clear the physical safety interlock before starting another cycle.";
-        effEl.textContent = "Fail (E-Stop)";
-        effEl.style.color = "var(--estop)";
-        compEl.textContent = "Compliance: SAFETY INTERLOCK TRIPPED";
-        compEl.style.color = "var(--estop)";
-      } else if (isPass) {
-        badgeEl.style.background = "var(--pass-soft)";
-        badgeEl.style.borderColor = "var(--pass)";
-        badgeEl.style.color = "var(--pass)";
-        badgeEl.textContent = "PASSED";
-        headlineEl.textContent = "Last cycle passed target";
-        guidanceEl.textContent = `Achieved SEI ${latestSei.toFixed(3)} (target ≥ 2.800). Area sanitized.`;
-        effEl.textContent = "Pass";
-        effEl.style.color = "var(--pass)";
-        compEl.textContent = "Compliance: AUDIT VERIFIED";
-        compEl.style.color = "var(--pass)";
-      } else if (isMarginal) {
-        badgeEl.style.background = "var(--marginal-soft)";
-        badgeEl.style.borderColor = "var(--marginal)";
-        badgeEl.style.color = "var(--marginal)";
-        badgeEl.textContent = "MARGINAL";
-        headlineEl.textContent = "Last cycle was marginal";
-        guidanceEl.textContent = `SEI ${latestSei.toFixed(3)} fell below 2.800. Run another cycle before use.`;
-        effEl.textContent = "Marginal";
-        effEl.style.color = "var(--marginal)";
-        compEl.textContent = "Compliance: REQUIRES ATTENTION";
-        compEl.style.color = "var(--marginal)";
-      } else {
-        badgeEl.style.background = "var(--fail-soft)";
-        badgeEl.style.borderColor = "var(--fail)";
-        badgeEl.style.color = "var(--fail)";
-        badgeEl.textContent = "FAILED";
-        headlineEl.textContent = "Last cycle failed target";
-        guidanceEl.textContent = `SEI ${latestSei.toFixed(3)} did not meet 2.800. Re-run cycle.`;
-        effEl.textContent = "Fail";
-        effEl.style.color = "var(--fail)";
-        compEl.textContent = "Compliance: REQUIRES ATTENTION";
-        compEl.style.color = "var(--fail)";
-      }
-
-      if (!liveSensorState) {
-        document.getElementById("sensor-temp").textContent = `${(Number(latest.ambient_temp_c) || 0).toFixed(1)} °C`;
-        document.getElementById("sensor-hum").textContent = `${(Number(latest.relative_humidity_pct) || 0).toFixed(1)} %`;
-        document.getElementById("sensor-flow").textContent = `${(Number(latest.flow_rate_ml_min) || 0).toFixed(1)} mL/min`;
-        const srcBadge = document.getElementById("sensor-source-badge");
-        if (srcBadge) {
-          srcBadge.style.background = "var(--surface-2)";
-          srcBadge.style.borderColor = "var(--border-strong)";
-          srcBadge.style.color = "var(--text-2)";
-          srcBadge.textContent = "LAST CYCLE";
-        }
-      }
-      document.getElementById("sensor-dur-vol").textContent =
-        `${(Number(latest.cycle_duration_sec) || 0).toFixed(1)}s / ${(Number(latest.room_volume_m3) || 1).toFixed(1)} m³`;
-    }
-
-    function renderTable(rows) {
-      const tbody = document.getElementById("table-body");
-      const summaryEl = document.getElementById("pagination-summary");
-      const pageLabelEl = document.getElementById("pagination-page-label");
-      const prevBtn = document.getElementById("btn-page-prev");
-      const nextBtn = document.getElementById("btn-page-next");
-
-      if (!Array.isArray(rows) || rows.length === 0) {
-        currentPage = 1;
-        if (summaryEl) summaryEl.textContent = "Showing 0 of 0 records";
-        if (pageLabelEl) pageLabelEl.textContent = "Page 1 of 1";
-        if (prevBtn) prevBtn.disabled = true;
-        if (nextBtn) nextBtn.disabled = true;
-        tbody.innerHTML = `<tr><td colspan="10" class="px-5 py-8 text-center muted">No matching sanitization records found.</td></tr>`;
-        return;
-      }
-
-      const totalRows = Math.max(rows.length, totalFilteredRecords);
-      const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
-      if (currentPage > totalPages) currentPage = totalPages;
-      if (currentPage < 1) currentPage = 1;
-
-      const startIdx = (currentPage - 1) * pageSize;
-      const pageRows = rows;
-
-      if (summaryEl) {
-        summaryEl.textContent = `Showing ${startIdx + 1}–${startIdx + pageRows.length} of ${totalRows}`;
-      }
-      if (pageLabelEl) pageLabelEl.textContent = `Page ${currentPage} of ${totalPages}`;
-      if (prevBtn) prevBtn.disabled = currentPage <= 1;
-      if (nextBtn) nextBtn.disabled = currentPage >= totalPages;
-
-      tbody.innerHTML = pageRows.map((row) => {
-        const rowId = Number(row.id) || 0;
-        const expanded = expandedRecordIds.has(rowId);
-        const rowSei = Number(row.sei_score) || 0;
-        const rowEstop = Boolean(row.estop_triggered) || row.compliance_status === "SAFETY INTERLOCK TRIPPED";
-        const tempVal = Number(row.ambient_temp_c) || 0;
-        const humVal = Number(row.relative_humidity_pct) || 0;
-        const flowVal = Number(row.flow_rate_ml_min) || 0;
-        const durVal = Number(row.cycle_duration_sec) || 0;
-        const volVal = Number(row.room_volume_m3) || 1;
-        const displayTime = escapeHtml(formatManilaTime(row.timestamp));
-        const safeStation = escapeHtml(row.station_id || "MIST-BOH-01");
-        const rawRecordHash = row.record_hash ? String(row.record_hash).trim() : "";
-        const rawPrevHash = row.prev_hash ? String(row.prev_hash).trim() : "";
-        const shortHash = formatTruncatedHash(rawRecordHash);
-        const seiColor = rowEstop || rowSei < 1.8 ? "var(--fail)" : (rowSei < 2.8 ? "var(--marginal)" : "var(--pass)");
-        const complianceLabel = escapeHtml(
-          row.compliance_status || (rowEstop ? "SAFETY INTERLOCK TRIPPED" : rowSei >= 2.8 ? "AUDIT VERIFIED" : "REQUIRES ATTENTION")
-        );
-
-        const mainRow = `
-          <tr class="row-hover cursor-pointer transition" data-toggle-row="${rowId}">
-            <td class="px-4 py-2.5 mono muted">#${escapeHtml(rowId)}</td>
-            <td class="px-4 py-2.5 mono">${displayTime}</td>
-            <td class="px-4 py-2.5 font-semibold">${safeStation}</td>
-            <td class="px-4 py-2.5 mono">${tempVal.toFixed(1)}°C / ${humVal.toFixed(1)}%</td>
-            <td class="px-4 py-2.5 mono">${flowVal.toFixed(1)} mL/min</td>
-            <td class="px-4 py-2.5 mono">${durVal.toFixed(1)}s / ${volVal.toFixed(1)}m³</td>
-            <td class="px-4 py-2.5 mono font-bold" style="color: ${seiColor};">${rowSei.toFixed(3)}</td>
-            <td class="px-4 py-2.5">${getBadge(row)}</td>
-            <td class="px-4 py-2.5 font-semibold" style="color: ${rowEstop ? "var(--estop)" : "var(--pass)"};">
-              ${rowEstop ? "E-Stop Active" : "Normal Delivery"}
-            </td>
-            <td class="px-4 py-2.5">
-              <span class="mono px-2 py-0.5 rounded subpanel" style="color: var(--sei);">${escapeHtml(shortHash)}</span>
-            </td>
-          </tr>
-        `;
-
-        if (!expanded) return mainRow;
-
-        return mainRow + `
-          <tr style="background: var(--surface-2);">
-            <td colspan="10" class="px-5 py-3">
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-[11px]">
-                <div>
-                  <span class="muted uppercase">Compliance Status:</span>
-                  <span class="mono font-semibold ml-1">${complianceLabel}</span>
-                </div>
-                <div class="flex items-center justify-between gap-2 min-w-0">
-                  <div class="truncate">
-                    <span class="muted uppercase">Record SHA-256:</span>
-                    <code class="mono ml-1" style="color: var(--sei);">${escapeHtml(rawRecordHash || "--")}</code>
-                  </div>
-                  ${rawRecordHash ? `<button type="button" class="btn-ghost px-2 py-0.5 text-[10px] mono shrink-0" data-copy-hash="${escapeHtml(rawRecordHash)}">Copy</button>` : ""}
-                </div>
-                <div class="flex items-center justify-between gap-2 min-w-0">
-                  <div class="truncate">
-                    <span class="muted uppercase">Prev SHA-256:</span>
-                    <code class="mono ml-1 secondary-text">${escapeHtml(rawPrevHash || "--")}</code>
-                  </div>
-                  ${rawPrevHash ? `<button type="button" class="btn-ghost px-2 py-0.5 text-[10px] mono shrink-0" data-copy-hash="${escapeHtml(rawPrevHash)}">Copy</button>` : ""}
-                </div>
+</div>
+
+<!-- ================= PRE-DISPATCH SAFETY MODAL ================= -->
+<div id="confirm-modal" class="overlay hidden" role="dialog" aria-modal="true" style="z-index:60;">
+  <div class="panel modal modal-sm">
+    <div>
+      <span class="eyebrow">Safety Protocol</span>
+      <h2 style="font-size:22px;font-weight:700;margin-top:6px;">Confirm Sanitization?</h2>
+      <p class="sub" style="font-size:12px;margin-top:8px;">Station will sound an audible warning tone before activating ultrasonic transducers.</p>
+    </div>
+    <dl class="card dl">
+      <div class="r"><dt class="muted">Active Station</dt><dd id="confirm-station-val" class="mono" style="font-weight:600;">MIST-BOH-01</dd></div>
+      <div class="r"><dt class="muted">Duration</dt><dd id="confirm-duration-val" class="mono c-flow" style="font-weight:600;">32 seconds</dd></div>
+      <div class="r"><dt class="muted">Room Volume</dt><dd id="confirm-volume-val" class="mono c-hum" style="font-weight:600;">1.0 m³</dd></div>
+      <div class="r"><dt class="muted">Estimated SEI</dt><dd id="confirm-estimate-val" class="mono tone-sei tone-text" style="font-weight:600;">2.880 SEI</dd></div>
+    </dl>
+    <label class="card check tone-warn" style="border-color:color-mix(in srgb,var(--marginal) 35%,transparent);">
+      <input id="confirm-area-clear" type="checkbox" />
+      <span>I verify the designated prep zone is evacuated and doors are secured.</span>
+    </label>
+    <div class="grid-btns">
+      <button id="btn-confirm-cancel" type="button" class="btn-ghost" style="padding:14px;">Cancel</button>
+      <button id="btn-confirm-dispatch" type="button" class="btn" disabled>Execute Cycle →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= MAIN APP SHELL ================= -->
+<div id="app-shell" class="shell hidden">
+  <header class="topbar">
+    <div class="topbar-left">
+      <div class="brand"><span class="brand-mark">S</span><span class="brand-name">SanMist</span></div>
+      <div class="station-select">
+        <span class="tiny-label">Station</span>
+        <select id="global-station-selector" class="mono" onchange="onStationChanged(this.value)">
+          <option value="MIST-BOH-01">Kitchen Prep Area (MIST-BOH-01)</option>
+        </select>
+      </div>
+    </div>
+
+    <nav class="nav">
+      <button onclick="switchView('overview')" id="tab-overview" class="nav-pill" aria-pressed="true">Overview</button>
+      <button onclick="switchView('schedules')" id="tab-schedules" class="nav-pill" aria-pressed="false">Schedules</button>
+      <button onclick="switchView('ledger')" id="tab-ledger" class="nav-pill" aria-pressed="false">Audit Ledger</button>
+      <button onclick="switchView('settings')" id="tab-settings" class="nav-pill" aria-pressed="false">Settings</button>
+    </nav>
+
+    <div class="topbar-right">
+      <button id="theme-toggle-btn" type="button" onclick="toggleColorTheme()" class="icon-btn" title="Toggle Light/Dark Theme">
+        <svg id="icon-sun" class="hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+        <svg id="icon-moon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
+      </button>
+      <button id="refresh-btn" type="button" class="btn-ghost">Refresh</button>
+      <button id="logout-btn" type="button" class="btn-ghost" style="border-color:var(--border-strong);">Sign Out</button>
+    </div>
+  </header>
+
+  <main class="content">
+
+    <!-- ============ VIEW 1: OVERVIEW ============ -->
+    <div id="view-overview" class="stack">
+      <section class="grid-2">
+        <!-- Cycle outcome -->
+        <div class="panel panel-body">
+          <div class="panel-head" style="margin:0;">
+            <span class="eyebrow">Active Station Telemetry</span>
+            <span id="stat-outcome-badge" class="chip mono tone-muted">STANDBY</span>
+          </div>
+          <div>
+            <h2 id="stat-headline" class="headline">Awaiting cycle data...</h2>
+            <p id="stat-guidance" class="sub" style="font-size:12px;margin-top:8px;">Real-time XGBoost ML-evaluated sanitization record will update here.</p>
+          </div>
+
+          <div class="tile-grid">
+            <div class="card stat-tile">
+              <div class="tiny-label">Time (PHT)</div>
+              <div id="stat-last-time" class="mono v">--:--:--</div>
+            </div>
+            <div id="tile-efficacy" class="card stat-tile tone-muted">
+              <div class="tiny-label">Efficacy</div>
+              <div id="stat-efficacy" class="v tone-text">--</div>
+            </div>
+            <div class="card stat-tile tone-info">
+              <div class="tiny-label">Confidence</div>
+              <div id="stat-confidence" class="mono v tone-text">--</div>
+            </div>
+            <div id="tile-safety" class="card stat-tile tone-muted">
+              <div class="tiny-label">Interlock</div>
+              <div id="stat-safety" class="v tone-text">--</div>
+            </div>
+          </div>
+
+          <div id="sei-card" class="card tone-sei">
+            <div class="row-between" style="font-size:12px;">
+              <span class="sub" style="font-weight:500;">Latest SEI Efficacy</span>
+              <span id="stat-sei" class="mono tone-text" style="font-size:22px;font-weight:700;">0.000</span>
+            </div>
+            <div class="gauge">
+              <div id="sei-gauge-bar" class="gauge-fill"></div>
+              <div class="gauge-marker" title="Target 2.800"></div>
+            </div>
+            <div class="gauge-legend mono muted"><span>0.0</span><span style="margin-left:auto;margin-right:12%;">Target ≥ 2.800</span><span>4.2+</span></div>
+          </div>
+        </div>
+
+        <!-- Live sensors -->
+        <div class="panel panel-body">
+          <div class="panel-head" style="margin:0;">
+            <span class="eyebrow">Live Environmental Telemetry</span>
+            <span id="sensor-source-badge" class="chip mono tone-muted">STANDBY</span>
+          </div>
+          <div class="tile-grid-2">
+            <div class="tone-card tone-temp sensor">
+              <div class="sensor-head"><span class="tiny-label">Ambient Temperature</span></div>
+              <div id="sensor-temp" class="mono big">25.0 °C</div>
+              <span class="mono src">DHT22 Digital Bus</span>
+            </div>
+            <div class="tone-card tone-hum sensor">
+              <div class="sensor-head"><span class="tiny-label">Relative Humidity</span></div>
+              <div id="sensor-hum" class="mono big">65.0 %</div>
+              <span class="mono src">DHT22 Digital Bus</span>
+            </div>
+            <div class="tone-card tone-flow sensor">
+              <div class="sensor-head"><span class="tiny-label">Atomizer Flow Rate</span></div>
+              <div id="sensor-flow" class="mono big">30.0 mL/min</div>
+              <span class="mono src">YF-S401 Hall Sensor</span>
+            </div>
+            <div id="hocl-card" class="tone-card tone-pass sensor">
+              <div class="sensor-head">
+                <span class="tiny-label">HOCl Level</span>
+                <span id="hocl-badge" class="chip mono" style="padding:2px 10px;font-size:10px;">NORMAL</span>
               </div>
-            </td>
-          </tr>
-        `;
-      }).join("");
-
-      tbody.querySelectorAll("[data-toggle-row]").forEach((tr) => {
-        tr.addEventListener("click", () => {
-          const id = Number(tr.dataset.toggleRow);
-          if (expandedRecordIds.has(id)) expandedRecordIds.delete(id);
-          else expandedRecordIds.add(id);
-          renderTable(currentRecords);
-        });
-      });
-
-      tbody.querySelectorAll("[data-copy-hash]").forEach((btn) => {
-        btn.addEventListener("click", async (event) => {
-          event.stopPropagation();
-          const hashValue = btn.dataset.copyHash || "";
-          if (!hashValue) return;
-          let copied = false;
-          if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
-            try {
-              await navigator.clipboard.writeText(hashValue);
-              copied = true;
-            } catch {
-              copied = false;
-            }
-          }
-          if (!copied) {
-            const ta = document.createElement("textarea");
-            ta.value = hashValue;
-            ta.setAttribute("readonly", "");
-            ta.style.position = "fixed";
-            ta.style.opacity = "0";
-            document.body.appendChild(ta);
-            ta.select();
-            try {
-              copied = document.execCommand("copy");
-            } catch {
-              copied = false;
-            }
-            document.body.removeChild(ta);
-          }
-          btn.textContent = copied ? "Copied!" : "Failed";
-          setTimeout(() => {
-            btn.textContent = "Copy";
-          }, 1400);
-        });
-      });
-    }
-
-    function openConfirmModal() {
-      const duration = parseInt(document.getElementById("input-duration").value, 10);
-      const volume = parseFloat(document.getElementById("input-volume").value);
-      if (!Number.isInteger(duration) || duration < 5 || duration > 300) return;
-      if (!Number.isFinite(volume) || volume < 0.1 || volume > 200) return;
-
-      const estSei = estimateSei(duration, volume, liveSensorState);
-      const suggestion = suggestedDuration(volume, liveSensorState);
-
-      document.getElementById("confirm-duration-val").textContent = `${duration} seconds`;
-      document.getElementById("confirm-volume-val").textContent = `${volume.toFixed(1)} m³`;
-      const estEl = document.getElementById("confirm-estimate-val");
-      estEl.textContent = `${estSei.toFixed(3)} SEI ${estSei >= 2.8 ? "(Target ≥ 2.800)" : "(Below 2.800)"}`;
-      estEl.style.color = estSei >= 2.8 ? "var(--pass)" : "var(--marginal)";
-
-      const warnBox = document.getElementById("confirm-low-warning");
-      const useTargetBtn = document.getElementById("btn-confirm-use-target");
-      if (estSei < 2.8) {
-        warnBox.classList.remove("hidden");
-        if (suggestion !== null) {
-          const sugSei = estimateSei(suggestion, volume, liveSensorState);
-          useTargetBtn.classList.remove("hidden");
-          useTargetBtn.textContent = `Use ${suggestion}s (Est. ${sugSei.toFixed(3)} SEI)`;
-          useTargetBtn.onclick = () => {
-            document.getElementById("input-duration").value = String(suggestion);
-            updateSeiEstimatePreview();
-            openConfirmModal();
-          };
-        } else {
-          useTargetBtn.classList.add("hidden");
-        }
-      } else {
-        warnBox.classList.add("hidden");
-      }
-
-      const checkbox = document.getElementById("confirm-area-clear");
-      checkbox.checked = false;
-      document.getElementById("btn-confirm-dispatch").disabled = true;
-      document.getElementById("confirm-modal").classList.remove("hidden");
-      checkbox.focus();
-    }
-
-    function closeConfirmModal(force = false) {
-      if (isDispatching && !force) return;
-      document.getElementById("confirm-modal").classList.add("hidden");
-    }
-
-    function clearCycleMonitor() {
-      if (countdownTimer) {
-        clearInterval(countdownTimer);
-        countdownTimer = null;
-      }
-      activeCycle = null;
-      document.getElementById("cycle-progress-panel").classList.add("hidden");
-      document.getElementById("cycle-overdue-controls").classList.add("hidden");
-    }
-
-    function startCycleCountdown(durationSec, volume, baselineId) {
-      if (countdownTimer) clearInterval(countdownTimer);
-
-      const panel = document.getElementById("cycle-progress-panel");
-      const phaseLabel = document.getElementById("cycle-phase-label");
-      const countdownEl = document.getElementById("cycle-countdown");
-      const progressBar = document.getElementById("cycle-progress-bar");
-      const overdueEl = document.getElementById("cycle-overdue-controls");
-
-      const preWarningMs = 1000;
-      const totalMs = preWarningMs + durationSec * 1000;
-      const startedAt = Date.now();
-      activeCycle = { durationSec, volume, baselineId, startedAt };
-
-      panel.classList.remove("hidden");
-      overdueEl.classList.add("hidden");
-      progressBar.style.width = "0%";
-
-      countdownTimer = setInterval(() => {
-        const elapsed = Date.now() - startedAt;
-        const pct = Math.min(100, (elapsed / totalMs) * 100);
-        const remainingSec = Math.max(0, (totalMs - elapsed) / 1000);
-        progressBar.style.width = `${pct.toFixed(1)}%`;
-
-        if (elapsed < preWarningMs) {
-          phaseLabel.style.color = "var(--marginal)";
-          phaseLabel.textContent = "Pre-Cycle Warning Tone (1s)";
-          countdownEl.textContent = `${remainingSec.toFixed(1)}s left`;
-        } else if (elapsed < totalMs) {
-          phaseLabel.style.color = "var(--pass)";
-          phaseLabel.textContent = "Atomizer Misting Active";
-          countdownEl.textContent = `${remainingSec.toFixed(1)}s left`;
-        } else {
-          phaseLabel.style.color = "var(--focus)";
-          phaseLabel.textContent = "Misting Complete — Awaiting Station Record";
-          countdownEl.textContent = "100%";
-          if (elapsed > totalMs + 8000) {
-            overdueEl.classList.remove("hidden");
-          }
-        }
-      }, 250);
-    }
-
-    function checkDispatchedCycleCompletion(newestRow) {
-      if (!activeCycle || !newestRow) return;
-      if (Number(newestRow.id) === Number(activeCycle.baselineId)) return;
-      let tsIso = String(newestRow.timestamp || "");
-      if (tsIso && !tsIso.endsWith("Z") && !tsIso.includes("+")) tsIso += "Z";
-      const recMs = new Date(tsIso).getTime();
-      if (!Number.isNaN(recMs) && recMs < activeCycle.startedAt - 15000) return;
-
-      clearCycleMonitor();
-      const feedback = document.getElementById("trigger-feedback");
-      if (feedback) {
-        feedback.classList.remove("hidden");
-        feedback.style.color = "var(--pass)";
-        feedback.textContent = `[RECORDED] Cycle #${newestRow.id} committed (SEI ${Number(newestRow.sei_score).toFixed(3)} · ${newestRow.efficacy_label}).`;
-      }
-    }
-
-    async function dispatchConfirmedCycle() {
-      const duration = parseInt(document.getElementById("input-duration").value, 10);
-      const volume = parseFloat(document.getElementById("input-volume").value);
-      const feedback = document.getElementById("trigger-feedback");
-      const dispatchBtn = document.getElementById("btn-confirm-dispatch");
-
-      if (!document.getElementById("confirm-area-clear").checked || isDispatching) return;
-
-      isDispatching = true;
-      dispatchBtn.disabled = true;
-      dispatchBtn.textContent = "Dispatching…";
-      document.getElementById("btn-open-confirm").disabled = true;
-
-      feedback.classList.remove("hidden");
-      feedback.style.color = "var(--focus)";
-      feedback.textContent = `[TRANSMITTING] Dispatching MQTT START (${duration}s @ ${volume.toFixed(1)} m³)…`;
-
-      try {
-        const res = await authFetch("/api/v1/trigger", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ duration_sec: duration, room_volume_m3: volume }),
-        });
-
-        if (!res.ok) {
-          const errBody = await res.json().catch(() => ({}));
-          throw new Error(errBody.detail || `HTTP ${res.status}: ${res.statusText}`);
-        }
-
-        const result = await res.json();
-        isDispatching = false;
-        closeConfirmModal(true);
-        feedback.style.color = "var(--pass)";
-        feedback.textContent = `[DISPATCHED] Command sent by ${result.triggered_by}. Executing pre-warning & misting…`;
-        startCycleCountdown(duration, volume, latestRecord?.id ?? 0);
-      } catch (err) {
-        isDispatching = false;
-        closeConfirmModal(true);
-        if (err.message !== "Unauthorized" && err.message !== "Unauthenticated") {
-          feedback.style.color = "var(--fail)";
-          feedback.textContent = `Dispatch failed: ${err.message}`;
-        }
-      } finally {
-        dispatchBtn.textContent = "Start Cycle";
-        document.getElementById("btn-open-confirm").disabled = false;
-        updateSeiEstimatePreview();
-      }
-    }
-
-    async function verifyLedgerChain() {
-      const btn = document.getElementById("verify-ledger-btn");
-      const banner = document.getElementById("ledger-verify-banner");
-      if (!btn || !banner) return;
-
-      btn.disabled = true;
-      const originalText = btn.textContent;
-      btn.textContent = "Verifying…";
-
-      try {
-        const res = await authFetch("/api/v1/ledger/verify");
-        if (!res.ok) {
-          const errBody = await res.json().catch(() => ({}));
-          throw new Error(errBody.detail || `HTTP ${res.status}: ${res.statusText}`);
-        }
-
-        const result = await res.json();
-        const isVerified = result.verified === true;
-        const checkedRecords = Number(result.checked_records) || 0;
-        const latestHash = String(result.latest_hash ?? "").trim();
-        const shortLatestHash = formatTruncatedHash(latestHash);
-        const tampered = Array.isArray(result.tampered_ids)
-          ? result.tampered_ids
-          : Array.isArray(result.corrupted_ids)
-            ? result.corrupted_ids
-            : [];
-
-        updateLedgerIntegrityBadge(isVerified, latestHash);
-
-        if (isVerified) {
-          banner.dataset.state = "verified";
-          banner.style.background = "var(--pass-soft)";
-          banner.style.color = "var(--text)";
-          banner.className = "px-5 py-2.5 border-b text-xs flex flex-wrap items-center justify-between gap-3";
-          banner.innerHTML = `
-            <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
-              <span class="font-bold" style="color: var(--pass);">SHA-256 Chain Verified</span>
-              <span>Checked Records: <strong class="mono">${escapeHtml(checkedRecords)}</strong></span>
-              <span>Latest Hash: <code class="mono px-1.5 py-0.5 rounded subpanel">${escapeHtml(shortLatestHash)}</code></span>
+              <div id="hocl-level-text" class="mono big" style="font-size:22px;margin-top:14px;">OK (Full)</div>
+              <span class="mono src">Level Float (GPIO 35)</span>
             </div>
-            <button type="button" onclick="dismissLedgerBanner()" class="btn-ghost px-2.5 py-1 text-[11px]">Dismiss</button>
-          `;
-        } else {
-          banner.dataset.state = "tampered";
-          const formattedIds = tampered.length > 0 ? tampered.map((id) => `#${escapeHtml(id)}`).join(", ") : "Unknown";
-          banner.style.background = "var(--fail-soft)";
-          banner.style.color = "var(--text)";
-          banner.className = "px-5 py-2.5 border-b text-xs flex flex-wrap items-center justify-between gap-3";
-          banner.innerHTML = `
-            <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
-              <span class="font-bold" style="color: var(--fail);">Tamper Alert!</span>
-              <span>Checked Records: <strong class="mono">${escapeHtml(checkedRecords)}</strong></span>
-              <span>Tampered IDs: <strong class="mono" style="color: var(--fail);">${formattedIds}</strong></span>
+          </div>
+          <div class="card">
+            <span class="tiny-label">Hardware Link Status</span>
+            <div style="margin-top:8px;">
+              <div class="link-row tone-pass" id="row-broker">
+                <span class="muted">MQTT Protocol Gateway</span>
+                <span class="val mono"><span class="dot"></span><span id="broker-status">Connected (broker.emqx.io)</span></span>
+              </div>
+              <div class="link-row tone-pass" id="row-ledger">
+                <span class="muted">SHA-256 Ledger Chain</span>
+                <span class="val mono"><span class="dot"></span><span id="ledger-integrity-badge">Verified</span></span>
+              </div>
             </div>
-            <button type="button" onclick="dismissLedgerBanner()" class="btn-ghost px-2.5 py-1 text-[11px]">Dismiss</button>
-          `;
-        }
-      } catch (err) {
-        if (err.message !== "Unauthorized" && err.message !== "Unauthenticated") {
-          banner.dataset.state = "error";
-          banner.style.background = "var(--fail-soft)";
-          banner.style.color = "var(--fail)";
-          banner.className = "px-5 py-2.5 border-b text-xs flex flex-wrap items-center justify-between gap-3";
-          banner.innerHTML = `
-            <span><strong>Verification Error:</strong> ${escapeHtml(err.message)}</span>
-            <button type="button" onclick="dismissLedgerBanner()" class="btn-ghost px-2.5 py-1 text-[11px]">Dismiss</button>
-          `;
-        }
-      } finally {
-        btn.disabled = false;
-        btn.textContent = originalText;
-      }
-    }
+          </div>
+        </div>
+      </section>
 
-    function setActiveStatusFilter(nextFilter) {
-      activeStatusFilter = nextFilter;
-      document.querySelectorAll(".filter-pill").forEach((pill) => {
-        pill.setAttribute("aria-pressed", pill.dataset.status === nextFilter ? "true" : "false");
-      });
-      document.querySelectorAll("[data-kpi-filter]").forEach((btn) => {
-        const key = btn.dataset.kpiFilter;
-        btn.setAttribute("aria-pressed", key === nextFilter ? "true" : "false");
-      });
-    }
+      <!-- KPI strip -->
+      <section class="kpi-grid">
+        <div class="tone-card tone-info kpi clickable" onclick="filterByKpi('all')">
+          <div class="k-label">Total</div><div id="stat-cycles" class="mono k-val">0</div>
+        </div>
+        <div id="kpi-rate" class="tone-card tone-pass kpi">
+          <div class="k-label">Pass Rate</div><div id="stat-pass-rate" class="mono k-val">0.0%</div>
+        </div>
+        <div class="tone-card tone-pass kpi clickable" onclick="filterByKpi('pass')">
+          <div class="k-label">Pass</div><div id="count-pass" class="mono k-val">0</div>
+        </div>
+        <div class="tone-card tone-warn kpi clickable" onclick="filterByKpi('marginal')">
+          <div class="k-label">Marginal</div><div id="count-marginal" class="mono k-val">0</div>
+        </div>
+        <div class="tone-card tone-fail kpi clickable" onclick="filterByKpi('fail')">
+          <div class="k-label">Fail</div><div id="count-fail" class="mono k-val">0</div>
+        </div>
+        <div class="tone-card tone-estop kpi clickable" onclick="filterByKpi('e-stop')">
+          <div class="k-label">E-Stop</div><div id="count-estop" class="mono k-val">0</div>
+        </div>
+      </section>
+    </div>
 
-    async function refreshDashboard(isPageRetry = false) {
-      if (!getToken()) return;
-      const errBanner = document.getElementById("service-error-banner");
+    <!-- ============ VIEW 2: SCHEDULES ============ -->
+    <div id="view-schedules" class="hidden">
+      <div class="split">
+        <aside class="panel split-aside">
+          <div>
+            <span class="eyebrow">Autonomous Cycles</span>
+            <h2 class="page-title">Schedule Disinfection</h2>
+            <p class="sub" style="font-size:12px;margin-top:12px;line-height:1.7;">Configure daily automated sanitization routines. Stations sound pre-warning buzzers before running ultrasonic atomizer cycles.</p>
+          </div>
 
-      try {
-        const searchVal = document.getElementById("search-input").value.trim();
-        const offset = Math.max(0, (currentPage - 1) * pageSize);
-        const params = new URLSearchParams({
-          limit: String(pageSize),
-          offset: String(offset),
-        });
-        if (activeStatusFilter !== "all") params.set("status", activeStatusFilter);
-        if (searchVal) params.set("search", searchVal);
+          <div class="info-list">
+            <div class="info-item tone-info">
+              <span class="info-ico"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path stroke-linecap="round" d="M12 7v5l3 2"/></svg></span>
+              <span>Timezone: Asia/Manila (PHT)</span>
+            </div>
+            <div class="info-item tone-pass">
+              <span class="info-ico"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6l8-3z"/><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4"/></svg></span>
+              <span>HOCl liquid interlock active prior to activation</span>
+            </div>
+            <div class="info-item tone-sei">
+              <span class="info-ico"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></span>
+              <span>Ledger logs every trigger with SHA-256 hash</span>
+            </div>
+          </div>
 
-        const [statsRes, latestRes, filteredRes] = await Promise.all([
-          authFetch("/api/v1/stats"),
-          authFetch("/api/v1/records?limit=1"),
-          authFetch(`/api/v1/records?${params.toString()}`),
-        ]);
+          <div id="sched-summary-card" class="tone-card tone-info summary-card">
+            <span class="tiny-label">Schedule Preview</span>
+            <p id="sched-summary-text" class="summary-line">--</p>
+            <span id="sched-sei-chip" class="chip mono tone-pass" style="align-self:flex-start;">Est. SEI --</span>
+          </div>
+        </aside>
 
-        if (!statsRes.ok || !latestRes.ok || !filteredRes.ok) {
-          throw new Error("Backend request failed");
-        }
+        <div class="panel form-card">
+          <div>
+            <label class="label">Active Days</label>
+            <div id="day-row" class="day-row"></div>
+            <input type="hidden" id="sched-days" value="MON,TUE,WED,THU,FRI" />
+            <div class="quick-row">
+              <button type="button" class="btn-ghost" data-days="MON,TUE,WED,THU,FRI">Weekdays</button>
+              <button type="button" class="btn-ghost" data-days="MON,TUE,WED,THU,FRI,SAT,SUN">Every day</button>
+              <button type="button" class="btn-ghost" data-days="SAT,SUN">Weekends</button>
+              <button type="button" class="btn-ghost" data-days="">Clear</button>
+            </div>
+          </div>
 
-        const stats = await statsRes.json();
-        const latestRows = await latestRes.json();
-        const filteredRows = await filteredRes.json();
-        currentRecords = Array.isArray(filteredRows) ? filteredRows : [];
+          <hr class="divider" />
 
-        const rawFiltered = filteredRes.headers.get("X-Filtered-Count") ?? filteredRes.headers.get("X-Total-Count");
-        const parsedCount = rawFiltered !== null ? parseInt(rawFiltered, 10) : NaN;
-        totalFilteredRecords = Number.isFinite(parsedCount) && parsedCount >= 0
-          ? parsedCount
-          : (offset + currentRecords.length);
-
-        if (currentRecords.length === 0 && totalFilteredRecords > 0 && currentPage > 1 && isPageRetry !== true) {
-          currentPage = Math.max(1, Math.ceil(totalFilteredRecords / pageSize));
-          return refreshDashboard(true);
-        }
-
-        lastReceivedAt = Date.now();
-        errBanner?.classList.add("hidden");
-
-        document.getElementById("stat-cycles").textContent = Number(stats.total_cycles) || 0;
-        document.getElementById("stat-pass-rate").textContent = `${(Number(stats.pass_rate_pct) || 0).toFixed(1)}%`;
-        document.getElementById("count-pass").textContent = Number(stats.pass_count) || 0;
-        document.getElementById("count-marginal").textContent = Number(stats.marginal_count) || 0;
-        document.getElementById("count-fail").textContent = Number(stats.fail_count) || 0;
-        document.getElementById("count-estop").textContent = Number(stats.estop_count) || 0;
-
-        updateLedgerIntegrityBadge(stats.ledger_verified, stats.latest_hash);
-        updateConnectionPanel(stats, true);
-
-        const banner = document.getElementById("ledger-verify-banner");
-        if (stats.ledger_verified === false && banner && banner.dataset.state === "verified") {
-          banner.dataset.state = "tampered";
-          banner.style.background = "var(--fail-soft)";
-          banner.style.color = "var(--text)";
-          banner.className = "px-5 py-2.5 border-b text-xs flex flex-wrap items-center justify-between gap-3";
-          banner.innerHTML = `
+          <div class="form-grid">
             <div>
-              <strong style="color: var(--fail);">Tamper Alert!</strong>
-              <span class="ml-2">Hash chain mismatch detected during refresh. Click <strong>Verify Ledger Chain</strong> to inspect affected records.</span>
+              <label class="label" for="sched-time">Trigger Time (PHT)</label>
+              <input type="time" id="sched-time" value="23:00" class="input" style="font-weight:500;" />
             </div>
-            <button type="button" onclick="dismissLedgerBanner()" class="btn-ghost px-2.5 py-1 text-[11px]">Dismiss</button>
-          `;
-        }
+            <div>
+              <label class="label" for="sched-dur">Misting Duration (Seconds)</label>
+              <input type="number" id="sched-dur" value="32" min="5" max="300" class="input mono" style="font-weight:600;" />
+            </div>
+          </div>
 
-        if (stats.live_telemetry) {
-          updateLiveSensorStrip(stats.live_telemetry);
-        }
+          <div>
+            <label class="label" for="sched-vol">Chamber Room Volume</label>
+            <div class="input-unit">
+              <input type="number" id="sched-vol" value="1.0" min="0.1" max="200" step="0.1" class="input mono" style="font-weight:600;" />
+              <span class="unit">m³</span>
+            </div>
+            <p class="field-hint">Used to compute the Sanitizer Exposure Index (SEI) for each run.</p>
+          </div>
 
-        if (Array.isArray(latestRows) && latestRows.length > 0) {
-          latestRecord = latestRows[0];
-          updateSummaryCards(latestRecord);
-          checkDispatchedCycleCompletion(latestRecord);
-        }
+          <button onclick="saveSchedule()" class="btn btn-block" style="padding:16px;">
+            <span>Save Disinfection Schedule</span><span>→</span>
+          </button>
+        </div>
+      </div>
+    </div>
 
-        renderTable(currentRecords);
-      } catch (err) {
-        if (err.message !== "Unauthorized" && err.message !== "Unauthenticated") {
-          updateConnectionPanel(null, false);
-          if (errBanner) {
-            document.getElementById("service-error-text").textContent = `Service connection issue (${err.message}). Retrying automatically…`;
-            errBanner.classList.remove("hidden");
-          }
-        }
-      }
+    <!-- ============ VIEW 3: AUDIT LEDGER ============ -->
+    <div id="view-ledger" class="hidden panel ledger">
+      <div class="ledger-head">
+        <div>
+          <h2 style="font-size:20px;font-weight:700;">Immutable Compliance Audit Ledger</h2>
+          <p class="muted" style="font-size:12px;margin-top:4px;">Tamper-evident SHA-256 hash chain • Click any row for details.</p>
+        </div>
+        <div class="ledger-tools">
+          <input id="search-input" type="search" placeholder="Search station, ID, status..." class="input input-sm" style="width:240px;" />
+          <div id="status-filter-group" class="seg">
+            <button type="button" data-status="all" class="nav-pill" aria-pressed="true">All</button>
+            <button type="button" data-status="pass" class="nav-pill" aria-pressed="false">Pass</button>
+            <button type="button" data-status="marginal" class="nav-pill" aria-pressed="false">Marginal</button>
+            <button type="button" data-status="fail" class="nav-pill" aria-pressed="false">Fail</button>
+            <button type="button" data-status="e-stop" class="nav-pill" aria-pressed="false">E-Stop</button>
+          </div>
+          <button id="verify-ledger-btn" type="button" class="btn-ghost tone-sei" style="color:var(--sei);font-weight:600;">Verify Hash Chain</button>
+        </div>
+      </div>
+
+      <div class="ledger-bar">
+        <div class="group">
+          <span class="muted" style="font-weight:500;">Export Window</span>
+          <select id="export-days" class="input input-sm mono">
+            <option value="7">Last 7 Days</option>
+            <option value="14" selected>Last 14 Days</option>
+            <option value="30">Last 30 Days</option>
+          </select>
+          <select id="export-scope" class="input input-sm mono">
+            <option value="CURRENT">Selected Station Only</option>
+            <option value="ALL">Entire Fleet (Combined)</option>
+          </select>
+        </div>
+        <button onclick="downloadFilteredReport()" class="btn btn-sm">Download CSV →</button>
+      </div>
+
+      <div id="ledger-verify-banner" class="banner hidden"></div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th><th>Timestamp (PHT)</th><th>Station</th><th>Temp / Hum</th>
+              <th>Flow Rate</th><th>Duration / Vol</th><th>SEI Score</th>
+              <th>Prediction</th><th>Safety Status</th><th>SHA-256 Hash</th>
+            </tr>
+          </thead>
+          <tbody id="table-body">
+            <tr><td colspan="10" class="muted" style="text-align:center;padding:48px;">Loading records...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div id="ledger-pagination" class="pager">
+        <span id="pagination-summary" class="mono muted">Showing 0 of 0 records</span>
+        <div class="group">
+          <label for="page-size-select" class="muted" style="font-weight:500;">Rows</label>
+          <select id="page-size-select" class="input input-sm mono">
+            <option value="10" selected>10</option>
+            <option value="25">25</option>
+            <option value="50">50</option>
+          </select>
+          <button id="btn-page-prev" type="button" class="btn-ghost" disabled>Prev</button>
+          <span id="pagination-page-label" class="mono sub" style="font-weight:600;">Page 1 of 1</span>
+          <button id="btn-page-next" type="button" class="btn-ghost" disabled>Next</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ VIEW 4: SETTINGS ============ -->
+    <div id="view-settings" class="hidden">
+      <div class="split">
+        <aside class="panel split-aside">
+          <div>
+            <span class="eyebrow">Fleet Provisioning</span>
+            <h2 class="page-title">Register Device</h2>
+            <p class="sub" style="font-size:12px;margin-top:12px;line-height:1.7;">Bind new ESP32 dry-fog hardware units to your organization. Enter the factory-provisioned serial number and cryptographic authentication key.</p>
+          </div>
+          <div style="border-top:1px solid var(--border);padding-top:20px;display:flex;flex-direction:column;gap:12px;">
+            <span class="tiny-label">Linked Stations</span>
+            <div id="device-list-container" style="display:flex;flex-direction:column;gap:12px;"></div>
+          </div>
+        </aside>
+
+        <div class="panel form-card">
+          <div>
+            <label class="label" for="reg-serial">Hardware Serial Number</label>
+            <input type="text" id="reg-serial" placeholder="e.g. SN-SANMIST-2026-X89" class="input mono" />
+          </div>
+          <div>
+            <label class="label" for="reg-key">Device Secret Key</label>
+            <div class="pw-wrap">
+              <input type="password" id="reg-key" placeholder="Enter hardware secret key" class="input" />
+              <button type="button" class="pw-toggle" data-pw-target="reg-key" aria-label="Show secret key">Show</button>
+            </div>
+          </div>
+          <div>
+            <label class="label" for="reg-nickname">Station Room Nickname</label>
+            <input type="text" id="reg-nickname" placeholder="e.g. Main Kitchen Cold Prep" class="input" />
+          </div>
+          <button onclick="claimDevice()" class="btn btn-block" style="padding:16px;">
+            <span>Register Station</span><span>→</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ================= JAVASCRIPT ================= -->
+<script>
+const API_BASE = window.location.hostname ? `http://${window.location.hostname}:8000` : "http://localhost:8000";
+const TOKEN_KEY = "sanmist_auth_token";
+const THEME_KEY = "mistsan_theme";
+const SEI_TARGET = 2.8;
+const DAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
+
+let pollTimer = null;
+let countdownTimer = null;
+let activeStatusFilter = "all";
+let currentRecords = [];
+let currentPage = 1;
+let pageSize = 10;
+let totalFilteredRecords = 0;
+let liveSensorState = null;
+let isCycleRunning = false;
+let activeStation = "MIST-BOH-01";
+const expandedRecordIds = new Set();
+
+const $ = (id) => document.getElementById(id);
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+function setTone(el, tone) {
+  if (!el) return;
+  el.className = el.className.replace(/\btone-(pass|warn|fail|estop|temp|hum|flow|sei|info|muted)\b/g, "").replace(/\s+/g, " ").trim() + " tone-" + tone;
+}
+
+function formatTruncatedHash(hash) {
+  const raw = String(hash ?? "").trim();
+  if (!raw) return "--";
+  if (raw.length <= 16) return raw;
+  return `${raw.slice(0, 8)}…${raw.slice(-6)}`;
+}
+
+function formatManilaTime(rawTimestamp) {
+  if (!rawTimestamp) return "--:--:--";
+  let isoStr = String(rawTimestamp);
+  if (!isoStr.endsWith("Z") && !isoStr.includes("+")) isoStr += "Z";
+  const dateObj = new Date(isoStr);
+  return isNaN(dateObj.getTime())
+    ? String(rawTimestamp)
+    : dateObj.toLocaleTimeString("en-US", { timeZone: "Asia/Manila", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true });
+}
+
+function to12h(hhmm) {
+  const [h, m] = String(hhmm || "00:00").split(":").map(Number);
+  if (isNaN(h)) return "--";
+  const suffix = h >= 12 ? "PM" : "AM";
+  return `${((h + 11) % 12) + 1}:${String(m || 0).padStart(2, "0")} ${suffix}`;
+}
+
+/* ---------- THEME ---------- */
+function applyTheme(theme) {
+  const normalized = theme === "light" ? "light" : "dark";
+  document.documentElement.dataset.theme = normalized;
+  $("icon-sun")?.classList.toggle("hidden", normalized !== "dark");
+  $("icon-moon")?.classList.toggle("hidden", normalized === "dark");
+  try { localStorage.setItem(THEME_KEY, normalized); } catch {}
+}
+function toggleColorTheme() {
+  applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light");
+}
+function initTheme() {
+  try { applyTheme(localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark"); }
+  catch { applyTheme("dark"); }
+}
+
+/* ---------- VIEWS ---------- */
+function switchView(viewName) {
+  ["overview", "schedules", "ledger", "settings"].forEach((v) => {
+    $(`view-${v}`)?.classList.toggle("hidden", v !== viewName);
+    $(`tab-${v}`)?.setAttribute("aria-pressed", v === viewName ? "true" : "false");
+  });
+  if (viewName === "ledger") refreshDashboard();
+  if (viewName === "schedules") updateScheduleSummary();
+}
+
+function openCycleModal() {
+  $("cycle-modal-overlay")?.classList.remove("hidden");
+  updateSeiEstimatePreview();
+}
+function closeCycleModal() { $("cycle-modal-overlay")?.classList.add("hidden"); }
+
+/* ---------- SEI MATH ---------- */
+function computeSeiLossFactor(env) {
+  const temp = Number.isFinite(env?.temp) ? env.temp : 25.0;
+  const hum = Number.isFinite(env?.hum) ? env.hum : 65.0;
+  const evapLoss = (temp - 25.0) * 0.003 - (hum - 65.0) * 0.001;
+  return Math.max(0.85, Math.min(1.15, 1.0 - evapLoss));
+}
+function estimateSei(duration, volume, env) {
+  if (!duration || !volume || duration <= 0 || volume <= 0) return null;
+  const flow = env?.flow && env.flow > 0 ? env.flow : 30.0;
+  const effectiveFlow = flow * computeSeiLossFactor(env);
+  return Math.round(((effectiveFlow * (duration / 60.0)) / volume) * 1000) / 1000;
+}
+function updateSeiEstimatePreview() {
+  const dur = parseInt($("input-duration").value, 10);
+  const vol = parseFloat($("input-volume").value);
+  const preview = $("sei-estimate-preview");
+  const startBtn = $("btn-open-confirm");
+  const env = liveSensorState || { temp: 25, hum: 65, flow: 30 };
+  $("sei-env-basis").textContent = `Env basis: ${env.temp.toFixed(1)}°C • ${env.hum.toFixed(0)}% RH • ${env.flow.toFixed(1)} mL/min (live telemetry)`;
+  if (!dur || !vol) return;
+  const sei = estimateSei(dur, vol, liveSensorState);
+  const pass = sei >= SEI_TARGET;
+  preview.textContent = pass ? `Est. SEI: ${sei.toFixed(3)} Pass (≥ 2.800)` : `Est. SEI: ${sei.toFixed(3)} Marginal (< 2.800)`;
+  setTone(preview, pass ? "pass" : "warn");
+  $("confirm-estimate-val").textContent = `${sei.toFixed(3)} SEI`;
+  if (startBtn) startBtn.disabled = Boolean(liveSensorState?.hoclLow);
+}
+
+/* ---------- AUTH FETCH ---------- */
+async function authFetch(path, options = {}) {
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (!token) { showLoginOverlay(); throw new Error("Unauthenticated"); }
+  const headers = new Headers(options.headers || {});
+  headers.set("Authorization", `Bearer ${token}`);
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  if (res.status === 401) { localStorage.removeItem(TOKEN_KEY); showLoginOverlay(); }
+  return res;
+}
+
+/* ---------- FLEET ---------- */
+async function loadFleetDevices() {
+  try {
+    const res = await authFetch("/api/v1/user/admin/devices");
+    if (!res.ok) return;
+    const devices = await res.json();
+    const selector = $("global-station-selector");
+    const listContainer = $("device-list-container");
+    if (selector && devices.length > 0) {
+      selector.innerHTML = devices.map((d) =>
+        `<option value="${escapeHtml(d.serial_number)}">${escapeHtml(d.nickname)} (${escapeHtml(d.serial_number)})</option>`).join("");
+      activeStation = selector.value;
     }
+    if (listContainer) {
+      listContainer.innerHTML = devices.map((d) => `
+        <div class="card device-item">
+          <div style="min-width:0;">
+            <p style="font-size:13px;font-weight:600;">${escapeHtml(d.nickname)}</p>
+            <p class="mono muted" style="font-size:10px;margin-top:2px;">${escapeHtml(d.serial_number)}</p>
+          </div>
+          <span class="chip tone-pass"><span class="dot"></span>Linked</span>
+        </div>`).join("");
+    }
+  } catch (err) {}
+}
+function onStationChanged(serial) {
+  activeStation = serial;
+  currentPage = 1;
+  refreshDashboard();
+}
+async function claimDevice() {
+  const serial = $("reg-serial").value.trim();
+  const key = $("reg-key").value.trim();
+  const nickname = $("reg-nickname").value.trim();
+  if (!serial || !key || !nickname) { alert("Please provide the Serial Number, Device Key, and Nickname."); return; }
+  try {
+    const res = await authFetch("/api/v1/devices/claim", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "admin", serial_number: serial, auth_key: key, nickname })
+    });
+    if (!res.ok) { const err = await res.json(); throw new Error(err.detail || "Registration failed"); }
+    alert("Device claimed successfully!");
+    $("reg-serial").value = ""; $("reg-key").value = ""; $("reg-nickname").value = "";
+    await loadFleetDevices();
+  } catch (err) { alert(`Error: ${err.message}`); }
+}
 
-    async function exportCsv() {
-      let rowsToExport = [];
+/* ---------- SCHEDULES ---------- */
+function getActiveDays() {
+  return $("sched-days").value.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
+}
+function setActiveDays(list) {
+  const set = new Set(list);
+  $("sched-days").value = DAYS.filter((d) => set.has(d)).join(",");
+  renderDayChips();
+  updateScheduleSummary();
+}
+function renderDayChips() {
+  const active = new Set(getActiveDays());
+  $("day-row").innerHTML = DAYS.map((d) =>
+    `<button type="button" class="day-chip" data-day="${d}" aria-pressed="${active.has(d)}">${d}</button>`).join("");
+}
+function updateScheduleSummary() {
+  const days = getActiveDays();
+  const time = $("sched-time").value;
+  const dur = parseInt($("sched-dur").value, 10);
+  const vol = parseFloat($("sched-vol").value);
+  let dayText = "No days selected";
+  if (days.length === 7) dayText = "Every day";
+  else if (days.join() === "MON,TUE,WED,THU,FRI") dayText = "Weekdays";
+  else if (days.join() === "SAT,SUN") dayText = "Weekends";
+  else if (days.length) dayText = days.join(", ");
+  $("sched-summary-text").textContent = `${dayText} at ${to12h(time)} • ${dur || "--"}s misting in ${vol || "--"} m³`;
+  const sei = estimateSei(dur, vol, liveSensorState || { temp: 25, hum: 65, flow: 30 });
+  const chip = $("sched-sei-chip");
+  if (sei === null) { chip.textContent = "Est. SEI --"; setTone(chip, "muted"); return; }
+  const pass = sei >= SEI_TARGET;
+  chip.textContent = `Est. SEI ${sei.toFixed(3)} • ${pass ? "Pass" : "Marginal"}`;
+  setTone(chip, pass ? "pass" : "warn");
+}
+async function saveSchedule() {
+  const days = $("sched-days").value.trim();
+  const time = $("sched-time").value.trim();
+  const dur = parseInt($("sched-dur").value, 10);
+  const vol = parseFloat($("sched-vol").value);
+  if (!days) { alert("Please select at least one active day."); return; }
+  if (!time || !dur || !vol) { alert("Please provide schedule time, duration, and room volume."); return; }
+  try {
+    const res = await authFetch("/api/v1/schedules", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        serial_number: activeStation,
+        days_of_week: days,
+        start_time_pht: time.length === 5 ? time + ":00" : time,
+        duration_sec: dur,
+        room_volume_m3: vol,
+        dosage_ml: 10.0
+      })
+    });
+    if (!res.ok) throw new Error("Failed to save schedule");
+    alert(`Schedule saved successfully for ${activeStation} (${dur}s @ ${vol} m³)!`);
+  } catch (err) { alert(err.message); }
+}
+
+function downloadFilteredReport() {
+  const days = $("export-days").value;
+  const scopeType = $("export-scope").value;
+  const targetScope = scopeType === "ALL" ? "ALL" : activeStation;
+  window.location.href = `${API_BASE}/api/v1/reports/export?scope=${encodeURIComponent(targetScope)}&days=${days}&format=csv`;
+}
+
+/* ---------- TELEMETRY ---------- */
+function updateLiveSensorStrip(telemetry) {
+  if (!telemetry) return;
+  liveSensorState = {
+    temp: Number(telemetry.ambient_temp_c) || 25.0,
+    hum: Number(telemetry.relative_humidity_pct) || 65.0,
+    flow: Number(telemetry.flow_rate_ml_min) || 30.0,
+    hoclLow: Boolean(telemetry.hocl_low_level ?? false)
+  };
+  $("sensor-temp").textContent = `${liveSensorState.temp.toFixed(1)} °C`;
+  $("sensor-hum").textContent = `${liveSensorState.hum.toFixed(1)} %`;
+  $("sensor-flow").textContent = `${liveSensorState.flow.toFixed(1)} mL/min`;
+
+  const low = liveSensorState.hoclLow;
+  const badge = $("hocl-badge");
+  setTone($("hocl-card"), low ? "fail" : "pass");
+  badge.textContent = low ? "DEPLETED" : "NORMAL";
+  $("hocl-level-text").textContent = low ? "LOW (Refill)" : "OK (Full)";
+  $("hocl-low-alert")?.classList.toggle("hidden", !low);
+  updateSeiEstimatePreview();
+  updateScheduleSummary();
+}
+
+/* ---------- RECORD CLASSIFICATION ---------- */
+function classify(r) {
+  const isEstop = Boolean(r.estop_triggered) || r.compliance_status === "SAFETY INTERLOCK TRIPPED";
+  const label = String(r.efficacy_label ?? "").toLowerCase();
+  if (isEstop) return { key: "estop", cls: "status-estop", text: "HALTED (E-STOP)", tone: "estop", isEstop: true };
+  if (label === "marginal" || Number(r.predicted_class) === 1) return { key: "marginal", cls: "status-marginal", text: "MARGINAL", tone: "warn", isEstop: false };
+  if (label === "fail" || Number(r.predicted_class) === 0) return { key: "fail", cls: "status-fail", text: "FAIL", tone: "fail", isEstop: false };
+  return { key: "pass", cls: "status-pass", text: "PASS", tone: "pass", isEstop: false };
+}
+const toneOfStatus = { pass: "var(--pass)", marginal: "var(--marginal)", fail: "var(--fail)", estop: "var(--estop)" };
+
+/* ---------- TABLE ---------- */
+function syncExpandWidth() {
+  const wrap = document.querySelector("#view-ledger .table-wrap");
+  if (wrap) wrap.style.setProperty("--wrap-w", `${Math.max(320, wrap.clientWidth - 56)}px`);
+}
+window.addEventListener("resize", syncExpandWidth);
+function renderTable(rows) {
+  const tbody = $("table-body");
+  const summaryEl = $("pagination-summary");
+  const pageLabelEl = $("pagination-page-label");
+  const prevBtn = $("btn-page-prev");
+  const nextBtn = $("btn-page-next");
+
+  if (!rows || rows.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="10" class="muted" style="text-align:center;padding:48px;">No compliance records found.</td></tr>`;
+    summaryEl.textContent = "Showing 0 of 0 records";
+    pageLabelEl.textContent = "Page 1 of 1";
+    prevBtn.disabled = true; nextBtn.disabled = true;
+    return;
+  }
+
+  const totalRows = Math.max(rows.length, totalFilteredRecords);
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+  const startIdx = (currentPage - 1) * pageSize;
+  summaryEl.textContent = `Showing ${startIdx + 1}–${Math.min(startIdx + rows.length, totalRows)} of ${totalRows} records`;
+  pageLabelEl.textContent = `Page ${currentPage} of ${totalPages}`;
+  prevBtn.disabled = currentPage <= 1;
+  nextBtn.disabled = currentPage >= totalPages;
+
+  tbody.innerHTML = rows.map((r) => {
+    const rowId = Number(r.id) || 0;
+    const expanded = expandedRecordIds.has(rowId);
+    const c = classify(r);
+    const recordHash = r.record_hash ? String(r.record_hash).trim() : "";
+    const prevHash = r.prev_hash ? String(r.prev_hash).trim() : "";
+
+    const main = `
+      <tr class="row" data-toggle-row="${rowId}">
+        <td class="mono muted">#${rowId}</td>
+        <td class="mono">${escapeHtml(formatManilaTime(r.timestamp))}</td>
+        <td><span class="station-chip">${escapeHtml(r.station_id || "MIST-BOH-01")}</span></td>
+        <td class="mono">${Number(r.ambient_temp_c).toFixed(1)}°C <span class="muted">/</span> ${Number(r.relative_humidity_pct).toFixed(0)}%</td>
+        <td class="mono">${Number(r.flow_rate_ml_min).toFixed(1)} mL/min</td>
+        <td class="mono">${Number(r.cycle_duration_sec).toFixed(1)}s <span class="muted">/</span> ${Number(r.room_volume_m3).toFixed(1)}m³</td>
+        <td class="mono" style="font-weight:700;">${Number(r.sei_score).toFixed(3)}</td>
+        <td><span class="chip ${c.cls}">${c.text}</span></td>
+        <td>${c.isEstop ? "E-Stop Active" : "Normal Delivery"}</td>
+        <td class="hash muted" style="font-size:11px;">${escapeHtml(formatTruncatedHash(recordHash))}</td>
+      </tr>`;
+    if (!expanded) return main;
+    return main + `
+      <tr class="expand"><td colspan="10">
+        <div class="expand-inner">
+        <div class="detail-row">
+          <div class="detail-item"><span class="tiny-label">Record ID</span><div class="v mono">#${rowId}</div></div>
+          <div class="detail-item"><span class="tiny-label">Station</span><div class="v mono">${escapeHtml(r.station_id || "MIST-BOH-01")}</div></div>
+          <div class="detail-item"><span class="tiny-label">ML Confidence</span><div class="v mono">${r.ml_confidence ? Number(r.ml_confidence).toFixed(1) + "%" : "Rule Check"}</div></div>
+          <div class="detail-item"><span class="tiny-label">Outcome</span><div style="margin-top:6px;"><span class="chip ${c.cls}">${c.text}</span></div></div>
+        </div>
+        <div class="hash-grid mono" style="font-size:12px;">
+          <div class="hash-box">
+            <div class="txt"><span class="tiny-label" style="display:block;margin-bottom:4px;">Record SHA-256</span><span class="hash tone-sei tone-text" style="font-weight:500;">${escapeHtml(recordHash || "--")}</span></div>
+            ${recordHash ? `<button type="button" class="btn-ghost" style="font-size:10px;padding:6px 12px;" data-copy-hash="${escapeHtml(recordHash)}">Copy</button>` : ""}
+          </div>
+          <div class="hash-box">
+            <div class="txt"><span class="tiny-label" style="display:block;margin-bottom:4px;">Previous Chain Hash</span><span class="hash sub" style="font-weight:400;">${escapeHtml(prevHash || "--")}</span></div>
+            ${prevHash ? `<button type="button" class="btn-ghost" style="font-size:10px;padding:6px 12px;" data-copy-hash="${escapeHtml(prevHash)}">Copy</button>` : ""}
+          </div>
+        </div>
+        </div>
+      </td></tr>`;
+  }).join("");
+
+  syncExpandWidth();
+  tbody.querySelectorAll("[data-toggle-row]").forEach((tr) => {
+    tr.addEventListener("click", () => {
+      const id = Number(tr.dataset.toggleRow);
+      if (expandedRecordIds.has(id)) expandedRecordIds.delete(id); else expandedRecordIds.add(id);
+      renderTable(currentRecords);
+    });
+  });
+  tbody.querySelectorAll("[data-copy-hash]").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
       try {
-        const searchVal = document.getElementById("search-input").value.trim();
-        const batchSize = 500;
-        let offset = 0;
-        let expectedTotal = Infinity;
+        await navigator.clipboard.writeText(btn.dataset.copyHash);
+        btn.textContent = "Copied!";
+        setTimeout(() => { btn.textContent = "Copy"; }, 1400);
+      } catch { btn.textContent = "Failed"; }
+    });
+  });
+}
 
-        while (offset < expectedTotal) {
-          const params = new URLSearchParams({
-            limit: String(batchSize),
-            offset: String(offset),
-          });
-          if (activeStatusFilter !== "all") params.set("status", activeStatusFilter);
-          if (searchVal) params.set("search", searchVal);
+/* ---------- DASHBOARD REFRESH ---------- */
+async function refreshDashboard() {
+  if (!localStorage.getItem(TOKEN_KEY)) return;
+  try {
+    const searchVal = $("search-input")?.value.trim() || "";
+    const offset = Math.max(0, (currentPage - 1) * pageSize);
+    const params = new URLSearchParams({ limit: String(pageSize), offset: String(offset) });
+    if (activeStatusFilter !== "all") params.set("status", activeStatusFilter);
+    if (searchVal) params.set("search", searchVal);
 
-          const res = await authFetch(`/api/v1/records?${params.toString()}`);
-          if (!res.ok) break;
+    const [statsRes, latestRes, filteredRes] = await Promise.all([
+      authFetch("/api/v1/stats"),
+      authFetch("/api/v1/records?limit=1"),
+      authFetch(`/api/v1/records?${params.toString()}`)
+    ]);
+    if (!statsRes.ok || !latestRes.ok || !filteredRes.ok) return;
 
-          const headerTotal = res.headers.get("X-Filtered-Count") ?? res.headers.get("X-Total-Count");
-          const parsedTotal = headerTotal !== null ? parseInt(headerTotal, 10) : NaN;
-          if (Number.isFinite(parsedTotal) && parsedTotal >= 0) {
-            expectedTotal = parsedTotal;
-          }
+    const stats = await statsRes.json();
+    const latestRows = await latestRes.json();
+    currentRecords = await filteredRes.json();
 
-          const batch = await res.json();
-          if (!Array.isArray(batch) || batch.length === 0) break;
-          rowsToExport.push(...batch);
-          offset += batch.length;
-          if (batch.length < batchSize) break;
-        }
-      } catch {
-        rowsToExport = [];
-      }
+    const countHeader = filteredRes.headers.get("X-Filtered-Count") ?? filteredRes.headers.get("X-Total-Count");
+    const parsedCount = countHeader !== null ? parseInt(countHeader, 10) : NaN;
+    totalFilteredRecords = Number.isFinite(parsedCount) && parsedCount >= 0 ? parsedCount : (Number(stats.total_cycles) || currentRecords.length);
 
-      if (!rowsToExport.length && currentRecords.length) {
-        rowsToExport = currentRecords;
-      }
+    const passRate = Number(stats.pass_rate_pct) || 0;
+    $("stat-cycles").textContent = stats.total_cycles || 0;
+    $("stat-pass-rate").textContent = `${passRate.toFixed(1)}%`;
+    setTone($("kpi-rate"), passRate >= 90 ? "pass" : passRate >= 70 ? "warn" : "fail");
+    $("count-pass").textContent = stats.pass_count || 0;
+    $("count-marginal").textContent = stats.marginal_count || 0;
+    $("count-fail").textContent = stats.fail_count || 0;
+    $("count-estop").textContent = stats.estop_count || 0;
 
-      if (!rowsToExport.length) {
-        alert("No audit records to export.");
-        return;
-      }
-
-      const headers = [
-        "id",
-        "timestamp",
-        "station_id",
-        "ambient_temp_c",
-        "relative_humidity_pct",
-        "flow_rate_ml_min",
-        "cycle_duration_sec",
-        "room_volume_m3",
-        "sei_score",
-        "efficacy_label",
-        "ml_confidence",
-        "compliance_status",
-        "delivery_confirmed",
-        "estop_triggered",
-        "prev_hash",
-        "record_hash",
-      ];
-
-      const escapeCsvCell = (val) => `"${String(val ?? "").replace(/"/g, '""')}"`;
-      const lines = [
-        headers.join(","),
-        ...rowsToExport.map((row) => headers.map((col) => escapeCsvCell(row[col])).join(",")),
-      ];
-
-      const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `sanmist_audit_ledger_${new Date().toISOString().slice(0, 10)}.csv`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+    if (stats.live_telemetry) {
+      updateLiveSensorStrip(stats.live_telemetry);
+      setTone($("sensor-source-badge"), "pass");
+      $("sensor-source-badge").textContent = "LIVE";
     }
 
-    async function handleLoginSubmit(event) {
-      event.preventDefault();
-      const username = document.getElementById("login-username").value.trim();
-      const password = document.getElementById("login-password").value;
-      const errBox = document.getElementById("login-error");
-      const btn = document.getElementById("login-submit-btn");
+    if (latestRows.length > 0) {
+      const l = latestRows[0];
+      const c = classify(l);
+      const sei = Number(l.sei_score) || 0;
 
-      errBox.classList.add("hidden");
-      btn.disabled = true;
-      btn.textContent = "Signing in…";
+      $("stat-last-time").textContent = formatManilaTime(l.timestamp);
+      $("stat-sei").textContent = sei.toFixed(3);
+      const headlines = {
+        pass: "Cycle validated and passed",
+        marginal: "Cycle completed with marginal dosage",
+        fail: "Cycle failed the efficacy check",
+        estop: "Last cycle halted by E-Stop"
+      };
+      $("stat-headline").textContent = headlines[c.key];
 
-      try {
-        const res = await fetch(`${API_BASE}/api/v1/auth/login`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username, password }),
-        });
+      const badge = $("stat-outcome-badge");
+      badge.textContent = c.key === "estop" ? "E-STOP" : c.text;
+      setTone(badge, c.tone);
 
-        const body = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          throw new Error(body.detail || "Invalid credentials");
-        }
+      $("stat-efficacy").textContent = c.key === "estop" ? "Fail (E-Stop)" : c.text.charAt(0) + c.text.slice(1).toLowerCase();
+      setTone($("tile-efficacy"), c.tone);
+      $("stat-confidence").textContent = l.ml_confidence ? `${Number(l.ml_confidence).toFixed(1)}%` : "Rule Check";
+      $("stat-safety").textContent = c.isEstop ? "Interlock Active" : "Normal";
+      setTone($("tile-safety"), c.isEstop ? "estop" : "pass");
 
-        setToken(body.access_token);
-        showDashboard(body.user);
-        await refreshDashboard();
-        startPolling();
-      } catch (err) {
-        errBox.textContent = err.message === "Failed to fetch"
-          ? `Cannot reach MistSan API at ${API_BASE}. Is uvicorn running?`
-          : err.message;
-        errBox.classList.remove("hidden");
-      } finally {
-        btn.disabled = false;
-        btn.textContent = "Sign In to Command Center";
-      }
+      const pct = Math.max(0, Math.min(100, (sei / (SEI_TARGET * 1.5)) * 100));
+      $("sei-gauge-bar").style.width = `${pct}%`;
+      setTone($("sei-gauge-bar"), c.tone);
+      setTone($("sei-card"), c.tone);
     }
+    renderTable(currentRecords);
+  } catch (err) {}
+}
 
-    async function handleLogout() {
-      const token = getToken();
-      if (token) {
-        fetch(`${API_BASE}/api/v1/auth/logout`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-        }).catch(() => {});
-      }
-      clearToken();
-      showLoginOverlay("");
+function filterByKpi(statusKey) {
+  activeStatusFilter = statusKey;
+  document.querySelectorAll("#status-filter-group .nav-pill").forEach((btn) => {
+    btn.setAttribute("aria-pressed", btn.dataset.status === statusKey ? "true" : "false");
+  });
+  currentPage = 1;
+  switchView("ledger");
+}
+
+async function verifyLedgerChain() {
+  const btn = $("verify-ledger-btn");
+  const banner = $("ledger-verify-banner");
+  btn.disabled = true;
+  btn.textContent = "Verifying...";
+  try {
+    const res = await authFetch("/api/v1/ledger/verify");
+    const data = await res.json();
+    banner.classList.remove("hidden");
+    const ok = Boolean(data.verified);
+    setTone(banner, ok ? "pass" : "fail");
+    banner.textContent = ok
+      ? `SHA-256 Ledger Verified: All ${data.checked_records} records unbroken.`
+      : `Ledger Tamper Alert: Signature mismatch detected on ID #${data.corrupted_ids?.[0] || "Unknown"}`;
+    $("ledger-integrity-badge").textContent = ok ? "Verified" : "Tamper Detected";
+    setTone($("row-ledger"), ok ? "pass" : "fail");
+  } catch (err) {
+    banner.classList.remove("hidden");
+    setTone(banner, "fail");
+    banner.textContent = `Verification Error: ${err.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Verify Hash Chain";
+  }
+}
+
+/* ---------- E-STOP & FAB ---------- */
+function updateEStopVisualState(isActive) {
+  isCycleRunning = isActive;
+  const btn = $("btn-ui-estop");
+  if (!btn) return;
+  btn.classList.toggle("is-active", isActive);
+  btn.setAttribute("aria-disabled", isActive ? "false" : "true");
+  if (!isActive) $("estop-btn-label").innerText = "EMERGENCY STOP (ABORT)";
+}
+
+function updateFloatingButton(isActive, remainingText = "") {
+  const fabBtn = $("btn-fab-start-cycle");
+  if (!fabBtn) return;
+  fabBtn.classList.toggle("active-cycle", isActive);
+  $("fab-indicator-dot").style.background = isActive ? "#ffffff" : "#10b981";
+  $("fab-label-text").textContent = isActive ? (remainingText || "Misting Active...") : "Start Cycle";
+}
+
+async function triggerUiEmergencyStop() {
+  if (!isCycleRunning) return;
+  $("estop-btn-label").innerText = "ABORTING CYCLE...";
+  try {
+    const response = await fetch(`${API_BASE}/api/v1/control/estop`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" }
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    clearInterval(countdownTimer);
+    $("cycle-progress-panel")?.classList.add("hidden");
+    updateFloatingButton(false);
+    setTimeout(refreshDashboard, 1200);
+  } catch (err) {
+    alert("Emergency stop dispatch failed! Please use physical hardware switch GPIO 5.");
+  } finally {
+    updateEStopVisualState(false);
+  }
+}
+
+function startCycleCountdown(durationSec) {
+  if (countdownTimer) clearInterval(countdownTimer);
+  const panel = $("cycle-progress-panel");
+  const phaseLabel = $("cycle-phase-label");
+  const countdownEl = $("cycle-countdown");
+  const progressBar = $("cycle-progress-bar");
+  const preWarningMs = 1000;
+  const totalMs = preWarningMs + durationSec * 1000;
+  const startedAt = Date.now();
+
+  panel?.classList.remove("hidden");
+  updateEStopVisualState(true);
+
+  countdownTimer = setInterval(() => {
+    const elapsed = Date.now() - startedAt;
+    const pct = Math.min(100, (elapsed / totalMs) * 100);
+    const remainingSec = Math.max(0, (totalMs - elapsed) / 1000);
+    if (progressBar) progressBar.style.width = `${pct.toFixed(1)}%`;
+
+    if (elapsed < preWarningMs) {
+      phaseLabel.textContent = "Pre-Cycle Warning Tone Active";
+      countdownEl.textContent = `${remainingSec.toFixed(1)}s left`;
+      updateFloatingButton(true, `Warning: ${remainingSec.toFixed(0)}s`);
+    } else if (elapsed < totalMs) {
+      phaseLabel.textContent = "Atomizer Misting Active";
+      countdownEl.textContent = `${remainingSec.toFixed(1)}s left`;
+      updateFloatingButton(true, `Misting: ${remainingSec.toFixed(0)}s left`);
+    } else {
+      phaseLabel.textContent = "Misting Complete — Processing Ledger";
+      countdownEl.textContent = "100%";
+      updateFloatingButton(true, "Logging Cycle...");
+      clearInterval(countdownTimer);
+      setTimeout(() => {
+        panel?.classList.add("hidden");
+        updateEStopVisualState(false);
+        updateFloatingButton(false);
+        refreshDashboard();
+      }, 3000);
     }
+  }, 250);
+}
 
-    async function bootstrapSession() {
-      const token = getToken();
-      if (!token) {
-        showLoginOverlay("");
-        return;
-      }
+/* ---------- BOOTSTRAP ---------- */
+function showDashboard() {
+  $("login-overlay")?.classList.add("hidden");
+  $("app-shell")?.classList.remove("hidden");
+  loadFleetDevices();
+  refreshDashboard();
+  if (!pollTimer) pollTimer = setInterval(refreshDashboard, 3000);
+}
+function showLoginOverlay() {
+  clearInterval(pollTimer);
+  pollTimer = null;
+  $("app-shell")?.classList.add("hidden");
+  $("login-overlay")?.classList.remove("hidden");
+}
+function fillDemoCredentials(u, p) {
+  $("login-username").value = u;
+  $("login-password").value = p;
+}
 
-      try {
-        const res = await authFetch("/api/v1/auth/me");
-        if (!res.ok) throw new Error("Session invalid");
-        const user = await res.json();
-        showDashboard(user);
-        await refreshDashboard();
-        startPolling();
-      } catch {
-        clearToken();
-        showLoginOverlay("");
-      }
-    }
-
-    // Event bindings
-    initTheme();
-    document.querySelectorAll("[data-theme-btn]").forEach((btn) => {
-      btn.addEventListener("click", () => applyTheme(btn.dataset.themeBtn));
+$("login-form")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const u = $("login-username").value.trim();
+  const p = $("login-password").value;
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: u, password: p })
     });
+    if (!res.ok) throw new Error("Invalid credentials");
+    const data = await res.json();
+    localStorage.setItem(TOKEN_KEY, data.access_token);
+    $("login-error").classList.add("hidden");
+    showDashboard();
+  } catch (err) {
+    const errBox = $("login-error");
+    errBox.textContent = err.message;
+    errBox.classList.remove("hidden");
+  }
+});
 
-    document.getElementById("toggle-login-password").addEventListener("click", (event) => {
-      const input = document.getElementById("login-password");
-      const isHidden = input.type === "password";
-      input.type = isHidden ? "text" : "password";
-      event.currentTarget.textContent = isHidden ? "Hide" : "Show";
+$("logout-btn")?.addEventListener("click", () => { localStorage.removeItem(TOKEN_KEY); showLoginOverlay(); });
+$("refresh-btn")?.addEventListener("click", refreshDashboard);
+
+$("btn-open-confirm")?.addEventListener("click", () => {
+  $("confirm-station-val").textContent = activeStation;
+  $("confirm-duration-val").textContent = `${$("input-duration").value} seconds`;
+  $("confirm-volume-val").textContent = `${$("input-volume").value} m³`;
+  $("confirm-area-clear").checked = false;
+  $("btn-confirm-dispatch").disabled = true;
+  updateSeiEstimatePreview();
+  $("confirm-modal")?.classList.remove("hidden");
+});
+$("btn-confirm-cancel")?.addEventListener("click", () => $("confirm-modal")?.classList.add("hidden"));
+$("confirm-area-clear")?.addEventListener("change", (e) => { $("btn-confirm-dispatch").disabled = !e.target.checked; });
+$("btn-confirm-dispatch")?.addEventListener("click", async () => {
+  const dur = parseInt($("input-duration").value, 10);
+  const vol = parseFloat($("input-volume").value);
+  try {
+    await authFetch("/api/v1/trigger", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ duration_sec: dur, room_volume_m3: vol })
     });
+    $("confirm-modal")?.classList.add("hidden");
+    startCycleCountdown(dur);
+  } catch (err) { alert(err.message); }
+});
 
-    document.getElementById("login-form").addEventListener("submit", handleLoginSubmit);
-    document.getElementById("refresh-btn").addEventListener("click", refreshDashboard);
-    document.getElementById("btn-retry-fetch").addEventListener("click", refreshDashboard);
-    document.getElementById("logout-btn").addEventListener("click", handleLogout);
-    document.getElementById("verify-ledger-btn").addEventListener("click", verifyLedgerChain);
-    document.getElementById("export-csv-btn").addEventListener("click", exportCsv);
+$("input-duration")?.addEventListener("input", updateSeiEstimatePreview);
+$("input-volume")?.addEventListener("input", updateSeiEstimatePreview);
+$("verify-ledger-btn")?.addEventListener("click", verifyLedgerChain);
 
-    document.getElementById("btn-dur-minus").addEventListener("click", () => {
-      const el = document.getElementById("input-duration");
-      const cur = parseInt(el.value, 10);
-      const next = Math.max(5, Math.min(300, (Number.isFinite(cur) ? cur : 32) - 5));
-      el.value = String(next);
-      updateSeiEstimatePreview();
-    });
+// Schedule form interactions
+$("day-row")?.addEventListener("click", (e) => {
+  const chip = e.target.closest("[data-day]");
+  if (!chip) return;
+  const set = new Set(getActiveDays());
+  set.has(chip.dataset.day) ? set.delete(chip.dataset.day) : set.add(chip.dataset.day);
+  setActiveDays([...set]);
+});
+document.querySelectorAll(".quick-row [data-days]").forEach((btn) => {
+  btn.addEventListener("click", () => setActiveDays(btn.dataset.days.split(",").filter(Boolean)));
+});
+["sched-time", "sched-dur", "sched-vol"].forEach((id) => $(id)?.addEventListener("input", updateScheduleSummary));
 
-    document.getElementById("btn-dur-plus").addEventListener("click", () => {
-      const el = document.getElementById("input-duration");
-      const cur = parseInt(el.value, 10);
-      const next = Math.max(5, Math.min(300, (Number.isFinite(cur) ? cur : 32) + 5));
-      el.value = String(next);
-      updateSeiEstimatePreview();
-    });
+// Ledger filters / pagination / search
+document.querySelectorAll("#status-filter-group .nav-pill").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("#status-filter-group .nav-pill").forEach((b) => b.setAttribute("aria-pressed", "false"));
+    btn.setAttribute("aria-pressed", "true");
+    activeStatusFilter = btn.dataset.status;
+    currentPage = 1;
+    refreshDashboard();
+  });
+});
+$("page-size-select")?.addEventListener("change", (e) => { pageSize = parseInt(e.target.value, 10) || 10; currentPage = 1; refreshDashboard(); });
+$("btn-page-prev")?.addEventListener("click", () => { if (currentPage > 1) { currentPage -= 1; refreshDashboard(); } });
+$("btn-page-next")?.addEventListener("click", () => { currentPage += 1; refreshDashboard(); });
 
-    document.getElementById("input-duration").addEventListener("input", updateSeiEstimatePreview);
-    document.getElementById("input-duration").addEventListener("change", updateSeiEstimatePreview);
-    document.getElementById("input-volume").addEventListener("input", updateSeiEstimatePreview);
-    document.getElementById("input-volume").addEventListener("change", updateSeiEstimatePreview);
+let searchDebounce = null;
+$("search-input")?.addEventListener("input", () => {
+  clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(() => { currentPage = 1; refreshDashboard(); }, 250);
+});
 
-    document.getElementById("btn-open-confirm").addEventListener("click", openConfirmModal);
-    document.getElementById("btn-confirm-cancel").addEventListener("click", () => closeConfirmModal(false));
-    document.getElementById("btn-confirm-dispatch").addEventListener("click", dispatchConfirmedCycle);
-    document.getElementById("confirm-area-clear").addEventListener("change", (event) => {
-      document.getElementById("btn-confirm-dispatch").disabled = !event.target.checked || isDispatching;
-    });
-    document.getElementById("confirm-modal").addEventListener("click", (event) => {
-      if (event.target.id === "confirm-modal") closeConfirmModal(false);
-    });
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && !document.getElementById("confirm-modal").classList.contains("hidden")) {
-        closeConfirmModal(false);
-      }
-    });
+// Show / hide password toggles
+document.querySelectorAll(".pw-toggle").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const input = $(btn.dataset.pwTarget);
+    if (!input) return;
+    const show = input.type === "password";
+    input.type = show ? "text" : "password";
+    btn.textContent = show ? "Hide" : "Show";
+    btn.setAttribute("aria-label", show ? "Hide password" : "Show password");
+  });
+});
 
-    document.getElementById("btn-cycle-check").addEventListener("click", refreshDashboard);
-    document.getElementById("btn-cycle-reset").addEventListener("click", clearCycleMonitor);
+// Close modal on backdrop click
+$("cycle-modal-overlay")?.addEventListener("click", (e) => { if (e.target === e.currentTarget) closeCycleModal(); });
 
-    let searchDebounce = null;
-    document.getElementById("search-input").addEventListener("input", () => {
-      clearTimeout(searchDebounce);
-      searchDebounce = setTimeout(() => {
-        currentPage = 1;
-        refreshDashboard();
-      }, 200);
-    });
-
-    document.querySelectorAll(".filter-pill").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        currentPage = 1;
-        setActiveStatusFilter(btn.dataset.status);
-        refreshDashboard();
-      });
-    });
-
-    document.querySelectorAll("[data-kpi-filter]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        currentPage = 1;
-        const target = btn.dataset.kpiFilter;
-        const next = target !== "all" && activeStatusFilter === target ? "all" : target;
-        setActiveStatusFilter(next);
-        refreshDashboard();
-      });
-    });
-
-    document.getElementById("page-size-select").addEventListener("change", (e) => {
-      const nextSize = parseInt(e.target.value, 10);
-      if (Number.isFinite(nextSize) && nextSize > 0) {
-        pageSize = nextSize;
-        currentPage = 1;
-        refreshDashboard();
-      }
-    });
-
-    document.getElementById("btn-page-prev").addEventListener("click", () => {
-      if (currentPage > 1) {
-        currentPage -= 1;
-        refreshDashboard();
-      }
-    });
-
-    document.getElementById("btn-page-next").addEventListener("click", () => {
-      const totalPages = Math.max(1, Math.ceil(totalFilteredRecords / pageSize));
-      if (currentPage < totalPages) {
-        currentPage += 1;
-        refreshDashboard();
-      }
-    });
-
-    updateSeiEstimatePreview();
-    bootstrapSession();
-  </script>
+initTheme();
+renderDayChips();
+updateScheduleSummary();
+if (localStorage.getItem(TOKEN_KEY)) showDashboard(); else showLoginOverlay();
+</script>
 </body>
-
 </html>
