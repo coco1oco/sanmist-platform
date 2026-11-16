@@ -4,6 +4,11 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>SanMist Fleet Command &amp; Compliance Ledger</title>
+<!-- Google Identity Services -->
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<!-- Client-side PDF generation -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -145,6 +150,8 @@ button { cursor: pointer; }
 .btn:hover:not(:disabled) { background: var(--primary-hover); transform: translateY(-1px); }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 .btn-block { width: 100%; }
+.btn svg, .btn-ghost svg { width: 15px; height: 15px; flex-shrink: 0; }
+.export-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .btn-sm { padding: 9px 18px; font-size: 12px; }
 .btn-ghost {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
@@ -359,6 +366,17 @@ tbody tr.expand td { background: var(--surface-sub); padding: 20px 28px; white-s
         <p class="sub" style="font-size:12px;margin-top:8px;">Authenticate to monitor real-time stations and schedule fogging cycles.</p>
       </div>
       <div id="login-error" class="alert tone-fail hidden"></div>
+            <!-- Google Sign-In Button Container -->
+      <div class="space-y-3 mb-4">
+        <div id="google-signin-btn-box" class="w-full flex justify-center"></div>
+
+        <div class="relative flex items-center justify-center my-2">
+          <div class="border-t w-full" style="border-color: var(--border);"></div>
+          <span class="px-2 text-[10px] uppercase tracking-wider muted absolute" style="background: var(--surface);">
+            or sign in with credentials
+          </span>
+        </div>
+      </div>
       <form id="login-form" class="login-form">
         <div><label class="label">Username</label><input id="login-username" type="text" required placeholder="admin" class="input" /></div>
         <div><label class="label">Password</label>
@@ -367,7 +385,7 @@ tbody tr.expand td { background: var(--surface-sub); padding: 20px 28px; white-s
             <button type="button" class="pw-toggle" data-pw-target="login-password" aria-label="Show password">Show</button>
           </div>
         </div>
-        <button id="login-submit-btn" type="submit" class="btn btn-block">Sign In to Dashboard →</button>
+        <button id="login-submit-btn" type="submit" class="btn btn-block">Sign In to Dashboard</button>
       </form>
       <div style="padding-top:20px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:10px;">
         <span class="tiny-label">Demo Credentials</span>
@@ -435,7 +453,7 @@ tbody tr.expand td { background: var(--surface-sub); padding: 20px 28px; white-s
     </div>
 
     <div class="btn-row">
-      <button id="btn-open-confirm" type="button" class="btn btn-block">Review &amp; Start Cycle →</button>
+      <button id="btn-open-confirm" type="button" class="btn btn-block">Review &amp; Start Cycle</button>
       <button id="btn-ui-estop" type="button" class="estop-btn" onclick="triggerUiEmergencyStop()" aria-disabled="true">
         <span id="estop-indicator-dot" class="dot"></span>
         <span id="estop-btn-label">EMERGENCY STOP (ABORT)</span>
@@ -464,7 +482,7 @@ tbody tr.expand td { background: var(--surface-sub); padding: 20px 28px; white-s
     </label>
     <div class="grid-btns">
       <button id="btn-confirm-cancel" type="button" class="btn-ghost" style="padding:14px;">Cancel</button>
-      <button id="btn-confirm-dispatch" type="button" class="btn" disabled>Execute Cycle →</button>
+      <button id="btn-confirm-dispatch" type="button" class="btn" disabled>Execute Cycle</button>
     </div>
   </div>
 </div>
@@ -685,7 +703,7 @@ tbody tr.expand td { background: var(--surface-sub); padding: 20px 28px; white-s
           </div>
 
           <button onclick="saveSchedule()" class="btn btn-block" style="padding:16px;">
-            <span>Save Disinfection Schedule</span><span>→</span>
+            <span>Save Disinfection Schedule</span>
           </button>
         </div>
       </div>
@@ -724,7 +742,16 @@ tbody tr.expand td { background: var(--surface-sub); padding: 20px 28px; white-s
             <option value="ALL">Entire Fleet (Combined)</option>
           </select>
         </div>
-        <button onclick="downloadFilteredReport()" class="btn btn-sm">Download CSV →</button>
+        <div class="export-actions">
+          <button onclick="downloadFilteredCsv()" class="btn-ghost" style="padding:10px 18px;">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v11m0 0l-4-4m4 4l4-4M5 20h14"/></svg>
+            Download CSV
+          </button>
+          <button onclick="generateAuditPdf()" class="btn btn-sm" style="padding:10px 18px;">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7 3h7l5 5v13H7V3zM14 3v5h5M10 13h6M10 17h6"/></svg>
+            Export Official PDF
+          </button>
+        </div>
       </div>
 
       <div id="ledger-verify-banner" class="banner hidden"></div>
@@ -792,7 +819,7 @@ tbody tr.expand td { background: var(--surface-sub); padding: 20px 28px; white-s
             <input type="text" id="reg-nickname" placeholder="e.g. Main Kitchen Cold Prep" class="input" />
           </div>
           <button onclick="claimDevice()" class="btn btn-block" style="padding:16px;">
-            <span>Register Station</span><span>→</span>
+            <span>Register Station</span>
           </button>
         </div>
       </div>
@@ -822,6 +849,70 @@ let activeStation = "MIST-BOH-01";
 const expandedRecordIds = new Set();
 
 const $ = (id) => document.getElementById(id);
+
+  // --- GOOGLE AUTHENTICATION INTEGRATION ---
+  // Paste your Client ID copied from Google Cloud Console inside the quotes below
+  const GOOGLE_CLIENT_ID = "844737309393-o2isok4bufbj8gdih11l8klaph3ksnsd.apps.googleusercontent.com";
+
+  function initGoogleAuth() {
+    if (typeof google === "undefined" || !google.accounts?.id) {
+      // Retry shortly if the Google library is still loading
+      setTimeout(initGoogleAuth, 200);
+      return;
+    }
+
+    google.accounts.id.initialize({
+      client_id: GOOGLE_CLIENT_ID,
+      callback: handleGoogleAuthCallback,
+      auto_select: false,
+      cancel_on_tap_outside: true
+    });
+
+    const btnBox = document.getElementById("google-signin-btn-box");
+    if (btnBox) {
+      google.accounts.id.renderButton(btnBox, {
+        type: "standard",
+        theme: document.documentElement.dataset.theme === "light" ? "outline" : "filled_black",
+        size: "large",
+        text: "signin_with",
+        shape: "rectangular",
+        logo_alignment: "left",
+        width: 380
+      });
+    }
+  }
+
+  async function handleGoogleAuthCallback(credentialResponse) {
+    const errBox = document.getElementById("login-error");
+    errBox?.classList.add("hidden");
+
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/auth/google`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id_token: credentialResponse.credential })
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Google authentication failed on server.");
+      }
+
+      const data = await res.json();
+      localStorage.setItem(TOKEN_KEY, data.access_token);
+      showDashboard();
+    } catch (err) {
+      if (errBox) {
+        errBox.textContent = err.message;
+        errBox.classList.remove("hidden");
+      }
+    }
+  }
+
+  // Call Google Auth init on load
+  window.addEventListener("DOMContentLoaded", () => {
+    initGoogleAuth();
+  });
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -1036,7 +1127,224 @@ async function saveSchedule() {
   } catch (err) { alert(err.message); }
 }
 
-function downloadFilteredReport() {
+/* ---------- EXPORTS (CSV + PDF) ---------- */
+function formatManilaDateTime(raw) {
+  if (!raw) return "--";
+  let iso = String(raw);
+  if (!iso.endsWith("Z") && !iso.includes("+")) iso += "Z";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return String(raw);
+  return d.toLocaleString("en-US", { timeZone: "Asia/Manila", month: "short", day: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true });
+}
+
+async function fetchExportRecords() {
+  const days = parseInt($("export-days").value, 10) || 14;
+  const scope = $("export-scope").value;
+  const params = new URLSearchParams({ limit: "1000", offset: "0" });
+  if (scope !== "ALL") params.set("search", activeStation);
+  const res = await authFetch(`/api/v1/records?${params.toString()}`);
+  if (!res.ok) throw new Error("Could not fetch records for export");
+  const all = await res.json();
+  const cutoff = Date.now() - days * 86400000;
+  const records = all.filter((r) => {
+    let ts = String(r.timestamp || "");
+    if (!ts.endsWith("Z") && !ts.includes("+")) ts += "Z";
+    const t = new Date(ts).getTime();
+    return !isNaN(t) && t >= cutoff && (scope === "ALL" || !r.station_id || r.station_id === activeStation);
+  });
+  return { records, days, scope };
+}
+
+async function downloadFilteredCsv() {
+  try {
+    const { records, days, scope } = await fetchExportRecords();
+    if (records.length === 0) { alert(`No sanitization records found in the last ${days} days.`); return; }
+    const headers = ["Record ID", "Timestamp (PHT)", "Station ID", "Ambient Temp (°C)", "Rel Humidity (%)", "Flow Rate (mL/min)", "Duration (s)", "Room Volume (m3)", "SEI Score", "Prediction", "Safety Status", "SHA-256 Hash", "Previous Hash"];
+    const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const rows = records.map((r) => {
+      const c = classify(r);
+      return [r.id, formatManilaDateTime(r.timestamp), r.station_id, r.ambient_temp_c, r.relative_humidity_pct, r.flow_rate_ml_min, r.cycle_duration_sec, r.room_volume_m3, Number(r.sei_score).toFixed(3), c.text, c.isEstop ? "E-Stop Active" : "Normal Delivery", r.record_hash, r.prev_hash].map(esc).join(",");
+    });
+    const blob = new Blob(["\uFEFF" + [headers.join(","), ...rows].join("\r\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `SanMist_Audit_Report_${scope === "ALL" ? "Fleet" : activeStation}_${days}Days.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (err) { alert(`CSV Export Failed: ${err.message}`); }
+}
+
+async function generateAuditPdf() {
+  const lib = window.jspdf;
+  if (!lib || !lib.jsPDF) { alert("PDF library is still loading. Please try again in a few seconds."); return; }
+  try {
+    const { records, days, scope } = await fetchExportRecords();
+    if (records.length === 0) { alert(`No sanitization records found in the last ${days} days.`); return; }
+
+    const doc = new lib.jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+    if (typeof doc.autoTable !== "function") throw new Error("PDF table plugin failed to load");
+
+    const W = 297, H = 210, M = 14;
+    const INK = [15, 23, 42], SLATE = [100, 116, 139], LINE = [226, 232, 240], SOFT = [248, 250, 252], BLACK = [11, 11, 14], BLUE = [37, 99, 235];
+    const TONE = { pass: [5, 150, 105], marginal: [217, 119, 6], fail: [220, 38, 38], estop: [190, 18, 60] };
+    const TINT = { pass: [209, 250, 229], marginal: [254, 243, 199], fail: [254, 226, 226], estop: [255, 228, 230] };
+
+    const counts = { pass: 0, marginal: 0, fail: 0, estop: 0 };
+    const classified = records.map((r) => { const c = classify(r); counts[c.key]++; return { r, c }; });
+    const total = records.length;
+    const passRate = (counts.pass / total) * 100;
+    const scopeLabel = scope === "ALL" ? "Entire Fleet (Combined)" : activeStation;
+    const now = new Date();
+    const generated = now.toLocaleString("en-US", { timeZone: "Asia/Manila", month: "short", day: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }) + " PHT";
+    const refId = `MS-${scope === "ALL" ? "FLEET" : activeStation}-${now.toISOString().slice(0, 10).replace(/-/g, "")}`;
+
+    const brandMark = (x, y, s) => {
+      doc.setFillColor(...BLUE); doc.roundedRect(x, y, s, s, s * 0.28, s * 0.28, "F");
+      doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(s * 1.3);
+      doc.text("S", x + s / 2, y + s / 2 + s * 0.17, { align: "center" });
+    };
+
+    /* ---- Page 1 header band ---- */
+    doc.setFillColor(...BLACK); doc.rect(0, 0, W, 30, "F");
+    doc.setFillColor(...BLUE); doc.rect(0, 30, W, 1.2, "F");
+    brandMark(M, 7.5, 15);
+    doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(15);
+    doc.text("Sanitization & Compliance Certificate", M + 21, 14.5);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(161, 161, 170);
+    doc.text("SANMIST FLEET COMMAND  |  Immutable SHA-256 audit ledger  |  Asia/Manila (PHT)", M + 21, 20.5);
+    doc.setFontSize(7.5); doc.setTextColor(161, 161, 170);
+    doc.text("DOCUMENT REF", W - M, 12, { align: "right" });
+    doc.setFont("courier", "bold"); doc.setFontSize(9); doc.setTextColor(255, 255, 255);
+    doc.text(refId, W - M, 17.5, { align: "right" });
+
+    /* ---- KPI cards ---- */
+    const cards = [
+      { label: "TOTAL CYCLES", value: String(total), color: BLUE },
+      { label: "PASS RATE", value: `${passRate.toFixed(1)}%`, color: passRate >= 90 ? TONE.pass : passRate >= 70 ? TONE.marginal : TONE.fail },
+      { label: "PASS", value: String(counts.pass), color: TONE.pass },
+      { label: "MARGINAL", value: String(counts.marginal), color: TONE.marginal },
+      { label: "FAIL", value: String(counts.fail), color: TONE.fail },
+      { label: "E-STOP", value: String(counts.estop), color: TONE.estop }
+    ];
+    const gap = 4, cw = (W - 2 * M - gap * (cards.length - 1)) / cards.length, cy = 38, ch = 20;
+    cards.forEach((k, i) => {
+      const x = M + i * (cw + gap);
+      doc.setFillColor(...SOFT); doc.setDrawColor(...LINE); doc.setLineWidth(0.3);
+      doc.roundedRect(x, cy, cw, ch, 2.5, 2.5, "FD");
+      doc.setFillColor(...k.color); doc.roundedRect(x, cy + 2, 1.6, ch - 4, 0.8, 0.8, "F");
+      doc.setFont("helvetica", "bold"); doc.setFontSize(6.5); doc.setTextColor(...k.color);
+      doc.text(k.label, x + 6, cy + 7);
+      doc.setFontSize(15); doc.setTextColor(...INK);
+      doc.text(k.value, x + 6, cy + 15.5);
+    });
+
+    /* ---- Metadata strip ---- */
+    const meta = [["STATION SCOPE", scopeLabel], ["AUDIT WINDOW", `Last ${days} days`], ["GENERATED", generated], ["LEDGER RECORDS", `${total} cycles`]];
+    const mw = (W - 2 * M) / meta.length;
+    meta.forEach(([label, value], i) => {
+      const x = M + i * mw;
+      doc.setFont("helvetica", "bold"); doc.setFontSize(6.5); doc.setTextColor(...SLATE);
+      doc.text(label, x, 67);
+      doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...INK);
+      doc.text(String(value), x, 72.5);
+    });
+    doc.setDrawColor(...LINE); doc.setLineWidth(0.3); doc.line(M, 77, W - M, 77);
+
+    /* ---- Records table ---- */
+    const shortHash = (h) => { const s = String(h || "").trim(); return !s ? "--" : s.length > 22 ? `${s.slice(0, 10)}...${s.slice(-8)}` : s; };
+    const body = classified.map(({ r, c }) => [
+      `#${r.id}`,
+      formatManilaDateTime(r.timestamp),
+      r.station_id || "MIST-BOH-01",
+      `${Number(r.ambient_temp_c).toFixed(1)}°C / ${Number(r.relative_humidity_pct).toFixed(0)}%`,
+      `${Number(r.flow_rate_ml_min).toFixed(1)} mL/min`,
+      `${Number(r.cycle_duration_sec).toFixed(0)}s / ${Number(r.room_volume_m3).toFixed(1)}m³`,
+      Number(r.sei_score).toFixed(3),
+      c.text,
+      c.isEstop ? "E-Stop Active" : "Normal Delivery",
+      shortHash(r.record_hash)
+    ]);
+
+    const compactHeader = () => {
+      doc.setFillColor(...BLACK); doc.rect(0, 0, W, 14, "F");
+      doc.setFillColor(...BLUE); doc.rect(0, 14, W, 0.8, "F");
+      brandMark(M, 3, 8);
+      doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(255, 255, 255);
+      doc.text("Sanitization & Compliance Certificate", M + 12, 8.6);
+      doc.setFont("courier", "bold"); doc.setFontSize(7.5); doc.setTextColor(161, 161, 170);
+      doc.text(refId, W - M, 8.6, { align: "right" });
+    };
+
+    doc.autoTable({
+      head: [["ID", "TIMESTAMP (PHT)", "STATION", "TEMP / HUM", "FLOW RATE", "DURATION / VOL", "SEI", "PREDICTION", "SAFETY STATUS", "SHA-256 HASH"]],
+      body,
+      startY: 82,
+      margin: { top: 22, left: M, right: M, bottom: 18 },
+      theme: "grid",
+      styles: { font: "helvetica", fontSize: 7.5, cellPadding: { top: 2.8, bottom: 2.8, left: 2.5, right: 2.5 }, lineColor: LINE, lineWidth: 0.15, textColor: INK, valign: "middle" },
+      headStyles: { fillColor: BLACK, textColor: [255, 255, 255], fontStyle: "bold", fontSize: 6.8, cellPadding: 3.2 },
+      alternateRowStyles: { fillColor: SOFT },
+      columnStyles: {
+        0: { cellWidth: 14, textColor: SLATE },
+        1: { cellWidth: 40 },
+        2: { cellWidth: 28, fontStyle: "bold" },
+        3: { cellWidth: 28 },
+        4: { cellWidth: 24 },
+        5: { cellWidth: 26 },
+        6: { cellWidth: 14, fontStyle: "bold", halign: "right" },
+        7: { cellWidth: 28, halign: "center" },
+        8: { cellWidth: 26 },
+        9: { cellWidth: 41 }
+      },
+      didParseCell: (d) => {
+        if (d.section !== "body") return;
+        const key = classified[d.row.index]?.c.key;
+        if (d.column.index === 7 && key) {
+          d.cell.styles.fillColor = TINT[key]; d.cell.styles.textColor = TONE[key];
+          d.cell.styles.fontStyle = "bold"; d.cell.styles.fontSize = 7;
+        }
+        if (d.column.index === 9) { d.cell.styles.font = "courier"; d.cell.styles.fontSize = 6.8; d.cell.styles.textColor = SLATE; }
+      },
+      didDrawPage: (d) => { if (d.pageNumber > 1) compactHeader(); }
+    });
+
+    /* ---- Chain anchors + sign-off ---- */
+    let y = doc.lastAutoTable.finalY + 10;
+    if (y + 44 > H - 18) { doc.addPage(); compactHeader(); y = 26; }
+    const first = classified[classified.length - 1].r, last = classified[0].r;
+    doc.setFillColor(...SOFT); doc.setDrawColor(...LINE); doc.setLineWidth(0.3);
+    doc.roundedRect(M, y, W - 2 * M, 22, 2.5, 2.5, "FD");
+    doc.setFont("helvetica", "bold"); doc.setFontSize(6.5); doc.setTextColor(...SLATE);
+    doc.text("LEDGER CHAIN ANCHORS", M + 6, y + 6.5);
+    doc.setFont("courier", "normal"); doc.setFontSize(7); doc.setTextColor(...INK);
+    doc.text(`Earliest record #${first.id}:  ${first.record_hash || "--"}`, M + 6, y + 12);
+    doc.text(`Latest record   #${last.id}:  ${last.record_hash || "--"}`, M + 6, y + 17.5);
+
+    const sy = y + 36;
+    if (sy < H - 18) {
+      doc.setDrawColor(...SLATE); doc.setLineWidth(0.3);
+      doc.line(M, sy, M + 70, sy); doc.line(W - M - 70, sy, W - M, sy);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(7); doc.setTextColor(...SLATE);
+      doc.text("Prepared by (Operator)", M, sy + 4.5);
+      doc.text("Verified by (Compliance Officer)", W - M - 70, sy + 4.5);
+    }
+
+    /* ---- Footer on every page ---- */
+    const pages = doc.getNumberOfPages();
+    for (let i = 1; i <= pages; i++) {
+      doc.setPage(i);
+      doc.setDrawColor(...LINE); doc.setLineWidth(0.3); doc.line(M, H - 12, W - M, H - 12);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(7); doc.setTextColor(...SLATE);
+      doc.text(`SanMist Fleet Command  |  Tamper-evident SHA-256 hash chain  |  Generated ${generated}`, M, H - 7);
+      doc.text(`Page ${i} of ${pages}`, W - M, H - 7, { align: "right" });
+    }
+
+    doc.save(`SanMist_Compliance_Certificate_${scope === "ALL" ? "Fleet" : activeStation}_${days}Days.pdf`);
+  } catch (err) { alert(`PDF Generation Failed: ${err.message}`); }
+}
+
+function legacyDownloadFilteredReport() {
   const days = $("export-days").value;
   const scopeType = $("export-scope").value;
   const targetScope = scopeType === "ALL" ? "ALL" : activeStation;
