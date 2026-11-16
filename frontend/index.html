@@ -327,11 +327,82 @@ tbody tr.expand td { background: var(--surface-sub); padding: 20px 28px; white-s
 .estop-btn.is-active .dot { background: #fff; }
 @keyframes pulse { 50% { opacity: .75; } }
 
-/* Login */
-.login-wrap { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; background: var(--bg); }
-.login-body { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; }
-.login-card { width: 100%; max-width: 440px; display: flex; flex-direction: column; gap: 24px; padding: 40px; }
+/* =========================================================
+   SLIDESHOW (login hero + dashboard banners)
+   ========================================================= */
+.slideshow { position: relative; overflow: hidden; border-radius: 28px; background: #04050a; isolation: isolate; color: #fff; border: 1px solid var(--border); }
+.slideshow.compact { height: 232px; border-radius: 24px; }
+.slide { position: absolute; inset: 0; opacity: 0; visibility: hidden; transition: opacity .9s ease, visibility .9s; }
+.slide.is-active { opacity: 1; visibility: visible; }
+.slide-art, .slide-photo, .slide-shade { position: absolute; inset: 0; }
+.slide-art svg { width: 100%; height: 100%; display: block; }
+.slide-photo { background-size: cover; background-position: center; opacity: 0; transform: scale(1.03); transition: opacity .8s ease, transform 9s ease-out; }
+.slide.has-photo .slide-photo { opacity: 1; }
+.slide.is-active .slide-photo { transform: scale(1.1); }
+.slide-shade { background: linear-gradient(180deg, rgba(0,0,0,.18) 0%, rgba(0,0,0,.18) 35%, rgba(0,0,0,.86) 100%); }
+.slideshow.compact .slide-shade { background: linear-gradient(90deg, rgba(0,0,0,.82) 0%, rgba(0,0,0,.45) 55%, rgba(0,0,0,.12) 100%); }
+.slide-copy { position: absolute; left: 0; bottom: 0; width: 100%; max-width: 580px; padding: 0 44px 76px; transform: translateY(10px); opacity: 0; transition: all .8s ease .15s; }
+.slide.is-active .slide-copy { transform: none; opacity: 1; }
+.slide-eyebrow { font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: #7dd3fc; }
+.slide-title { font-size: 32px; font-weight: 700; line-height: 1.18; letter-spacing: -.025em; margin-top: 12px; }
+.slide-text { font-size: 13px; line-height: 1.75; color: rgba(255,255,255,.78); margin-top: 12px; max-width: 460px; }
+.slideshow.compact .slide-copy { top: 0; max-width: 620px; padding: 0 36px; display: flex; flex-direction: column; justify-content: center; }
+.slideshow.compact .slide-title { font-size: 24px; margin-top: 8px; }
+.slideshow.compact .slide-text { font-size: 12px; margin-top: 8px; }
+.slide-dots { position: absolute; left: 44px; bottom: 32px; z-index: 3; display: flex; gap: 8px; }
+.slideshow.compact .slide-dots { left: 36px; bottom: 20px; }
+.dot-btn { width: 8px; height: 8px; padding: 0; border: 0; border-radius: 9999px; background: rgba(255,255,255,.35); transition: all .3s ease; }
+.dot-btn:hover { background: rgba(255,255,255,.6); }
+.dot-btn.is-active { width: 28px; background: #fff; }
+.login-hero .art-wide { display: none; }
+.hero-banner { position: relative; }
+.banner-chips { position: absolute; top: 18px; right: 18px; z-index: 4; display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.glass { color: #fff; background: rgba(0,0,0,.5); border: 1px solid rgba(255,255,255,.2); backdrop-filter: blur(10px); }
+
+/* =========================================================
+   LOGIN
+   ========================================================= */
+.login-wrap { position: fixed; inset: 0; z-index: 50; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(440px, 1fr); background: var(--bg); overflow-y: auto; }
+.login-hero { position: relative; padding: 20px; min-height: 100vh; }
+.login-hero .slideshow { height: 100%; min-height: calc(100vh - 40px); }
+.login-side { display: flex; flex-direction: column; min-width: 0; min-height: 100vh; }
+.login-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 28px 56px 0; }
+.login-body { flex: 1; display: flex; align-items: center; justify-content: center; padding: 32px 56px 56px; }
+.login-card { width: 100%; max-width: 400px; display: flex; flex-direction: column; gap: 28px; }
+.login-title { font-size: 32px; font-weight: 700; letter-spacing: -.025em; line-height: 1.2; margin-top: 8px; }
 .login-form { display: flex; flex-direction: column; gap: 20px; }
+.google-box { position: relative; width: 100%; height: 52px; }
+.google-custom { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 12px; border-radius: 14px; font-size: 14px; font-weight: 600; color: var(--text);
+  background: var(--surface-card); border: 1px solid var(--border-strong); transition: all .15s ease; }
+.google-box:hover .google-custom { background: var(--surface-sub); border-color: var(--text-muted); transform: translateY(-1px); }
+.google-box.is-disabled .google-custom { opacity: .5; }
+/* The real Google button sits on top, invisible, and is stretched to fill the whole custom button so every click reaches it */
+.google-overlay { position: absolute; inset: 0; overflow: hidden; opacity: .01; display: flex; align-items: center; justify-content: center; border-radius: 14px; }
+.google-overlay > * { transform: scaleY(1.3); transform-origin: center; flex-shrink: 0; }
+.or-divider { display: flex; align-items: center; gap: 14px; font-size: 10px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--text-muted); }
+.or-divider::before, .or-divider::after { content: ""; flex: 1; height: 1px; background: var(--border-strong); }
+.btn-lg { height: 52px; padding: 0 24px; font-size: 14px; border-radius: 14px; }
+.demo-btn { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 13px 18px; border-radius: 14px; text-align: left; font-size: 12px; transition: all .15s ease;
+  background: color-mix(in srgb, var(--pass) 8%, transparent); border: 1px dashed color-mix(in srgb, var(--pass) 45%, transparent); }
+.demo-btn:hover { background: color-mix(in srgb, var(--pass) 15%, transparent); transform: translateY(-1px); }
+.demo-btn .who { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; color: var(--pass); }
+.login-foot { font-size: 11px; color: var(--text-muted); text-align: center; line-height: 1.7; }
+
+/* Empty state / onboarding */
+.empty-note { display: flex; align-items: center; gap: 20px; padding: 22px 26px; flex-wrap: wrap; }
+.empty-ico { width: 44px; height: 44px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: var(--tone); }
+.empty-ico svg { width: 30px; height: 30px; }
+.empty-copy { flex: 1; min-width: 240px; }
+.empty-copy h3 { font-size: 15px; font-weight: 700; }
+.empty-copy p { font-size: 12px; color: var(--text-sub); margin-top: 4px; line-height: 1.7; }
+.step-list { display: flex; flex-direction: column; gap: 14px; counter-reset: step; }
+.step-list li { list-style: none; display: flex; gap: 14px; align-items: flex-start; font-size: 12px; color: var(--text-sub); line-height: 1.6; counter-increment: step; }
+.step-list li::before { content: counter(step); flex-shrink: 0; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.step-list { padding: 0; margin: 0; }
+.fab-hidden { display: none !important; }
+#view-overview.is-empty .grid-2, #view-overview.is-empty .kpi-grid { opacity: .38; filter: grayscale(.8); pointer-events: none; user-select: none; transition: opacity .3s ease; }
+.toast { position: fixed; left: 50%; bottom: 32px; transform: translate(-50%, 20px); z-index: 80; padding: 14px 22px; border-radius: 14px; font-size: 13px; font-weight: 600; color: #fff; background: #059669; box-shadow: 0 18px 40px -12px rgba(0,0,0,.55); opacity: 0; pointer-events: none; transition: all .3s ease; }
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
 
 /* Responsive */
 @media (max-width: 1100px) {
@@ -339,7 +410,24 @@ tbody tr.expand td { background: var(--surface-sub); padding: 20px 28px; white-s
   .kpi-grid { grid-template-columns: repeat(3, 1fr); }
   .tile-grid { grid-template-columns: repeat(2, 1fr); }
 }
+@media (max-width: 900px) {
+  .login-wrap { grid-template-columns: 1fr; }
+  .login-hero { min-height: 0; padding: 16px 16px 0; }
+  .login-hero .slideshow { min-height: 0; height: 260px; border-radius: 22px; }
+  .login-hero .slide-copy { top: 0; padding: 0 28px; justify-content: center; display: flex; flex-direction: column; }
+  .login-hero .slide-title { font-size: 22px; }
+  .login-hero .slide-text { display: none; }
+  .login-hero .slide-dots { left: 28px; bottom: 18px; }
+  .login-hero .art-tall { display: none; }
+  .login-hero .art-wide { display: block; }
+  .login-side { min-height: 0; }
+  .login-top { padding: 20px 24px 0; }
+  .login-body { padding: 24px 24px 40px; }
+}
 @media (max-width: 720px) {
+  .slideshow.compact { height: 200px; }
+  .slideshow.compact .slide-text { display: none; }
+  .banner-chips { top: 12px; right: 12px; }
   .topbar { padding: 14px 20px; }
   main.content { padding: 24px 20px 120px; }
   .panel, .form-card { padding: 24px; }
@@ -354,48 +442,64 @@ tbody tr.expand td { background: var(--surface-sub); padding: 20px 28px; white-s
 
 <!-- ================= AUTHENTICATION ================= -->
 <div id="login-overlay" class="login-wrap">
-  <header class="topbar">
-    <div class="brand"><span class="brand-mark">S</span><span class="brand-name">SanMist Fleet</span></div>
-    <button class="btn-ghost" onclick="toggleColorTheme()" title="Toggle Theme">Theme</button>
-  </header>
-  <div class="login-body">
-    <div class="panel login-card">
-      <div>
-        <span class="eyebrow">Secure Access</span>
-        <h1 class="page-title" style="font-size:26px;">Operator Sign In</h1>
-        <p class="sub" style="font-size:12px;margin-top:8px;">Authenticate to monitor real-time stations and schedule fogging cycles.</p>
-      </div>
-      <div id="login-error" class="alert tone-fail hidden"></div>
-            <!-- Google Sign-In Button Container -->
-      <div class="space-y-3 mb-4">
-        <div id="google-signin-btn-box" class="w-full flex justify-center"></div>
+  <section class="login-hero" aria-label="SanMist highlights">
+    <div id="login-slideshow"></div>
+  </section>
 
-        <div class="relative flex items-center justify-center my-2">
-          <div class="border-t w-full" style="border-color: var(--border);"></div>
-          <span class="px-2 text-[10px] uppercase tracking-wider muted absolute" style="background: var(--surface);">
-            or sign in with credentials
-          </span>
+  <section class="login-side">
+    <div class="login-top">
+      <div class="brand"><span class="brand-mark">S</span><span class="brand-name">SanMist Fleet</span></div>
+      <button type="button" class="icon-btn" onclick="toggleColorTheme()" title="Toggle Light/Dark Theme" aria-label="Toggle theme">
+        <svg class="js-icon-sun hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+        <svg class="js-icon-moon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
+      </button>
+    </div>
+
+    <div class="login-body">
+      <div class="login-card">
+        <div>
+          <span class="eyebrow">Secure Access</span>
+          <h1 class="login-title">Welcome back</h1>
+          <p class="sub" style="font-size:13px;margin-top:10px;line-height:1.7;">Sign in to monitor your stations in real time and schedule dry-fog sanitation cycles.</p>
         </div>
-      </div>
-      <form id="login-form" class="login-form">
-        <div><label class="label">Username</label><input id="login-username" type="text" required placeholder="admin" class="input" /></div>
-        <div><label class="label">Password</label>
-          <div class="pw-wrap">
-            <input id="login-password" type="password" required placeholder="••••••••" class="input" />
-            <button type="button" class="pw-toggle" data-pw-target="login-password" aria-label="Show password">Show</button>
+
+        <div id="login-error" class="alert tone-fail hidden"></div>
+
+        <div style="display:flex;flex-direction:column;gap:22px;">
+          <div id="google-signin-btn-box" class="google-box">
+            <div class="google-custom" aria-hidden="true">
+              <svg viewBox="0 0 48 48" width="18" height="18"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+              <span id="google-label">Continue with Google</span>
+            </div>
+            <div id="google-render" class="google-overlay"></div>
           </div>
+          <div class="or-divider">or sign in with credentials</div>
         </div>
-        <button id="login-submit-btn" type="submit" class="btn btn-block">Sign In to Dashboard</button>
-      </form>
-      <div style="padding-top:20px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:10px;">
-        <span class="tiny-label">Demo Credentials</span>
-        <button type="button" onclick="fillDemoCredentials('admin','sanmist2026')" class="card row-between" style="width:100%;padding:14px 18px;text-align:left;">
-          <span class="tone-pass tone-text" style="font-size:12px;font-weight:600;">Admin Demo</span>
-          <span class="mono muted" style="font-size:12px;">admin / sanmist2026</span>
-        </button>
+
+        <form id="login-form" class="login-form">
+          <div><label class="label" for="login-username">Username</label><input id="login-username" type="text" required placeholder="admin" autocomplete="username" class="input" /></div>
+          <div>
+            <label class="label" for="login-password">Password</label>
+            <div class="pw-wrap">
+              <input id="login-password" type="password" required placeholder="••••••••" autocomplete="current-password" class="input" />
+              <button type="button" class="pw-toggle" data-pw-target="login-password" aria-label="Show password">Show</button>
+            </div>
+          </div>
+          <button id="login-submit-btn" type="submit" class="btn btn-block btn-lg">Sign In to Dashboard</button>
+        </form>
+
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <span class="tiny-label">Demo credentials</span>
+          <button type="button" onclick="fillDemoCredentials('admin','sanmist2026')" class="demo-btn">
+            <span class="who"><span class="dot" style="--tone:var(--pass)"></span>Admin Demo</span>
+            <span class="muted" style="font-size:12px;">admin / sanmist2026</span>
+          </button>
+        </div>
+
+        <p class="login-foot">New here? Sign in with Google, then link your first station.</p>
       </div>
     </div>
-  </div>
+  </section>
 </div>
 
 <!-- ================= FLOATING ACTION BUTTON ================= -->
@@ -509,8 +613,8 @@ tbody tr.expand td { background: var(--surface-sub); padding: 20px 28px; white-s
 
     <div class="topbar-right">
       <button id="theme-toggle-btn" type="button" onclick="toggleColorTheme()" class="icon-btn" title="Toggle Light/Dark Theme">
-        <svg id="icon-sun" class="hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
-        <svg id="icon-moon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
+        <svg class="js-icon-sun hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+        <svg class="js-icon-moon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
       </button>
       <button id="refresh-btn" type="button" class="btn-ghost">Refresh</button>
       <button id="logout-btn" type="button" class="btn-ghost" style="border-color:var(--border-strong);">Sign Out</button>
@@ -521,6 +625,26 @@ tbody tr.expand td { background: var(--surface-sub); padding: 20px 28px; white-s
 
     <!-- ============ VIEW 1: OVERVIEW ============ -->
     <div id="view-overview" class="stack">
+      <!-- Hero slideshow -->
+      <div class="hero-banner">
+        <div id="dash-slideshow"></div>
+        <div class="banner-chips">
+          <span class="chip glass"><span id="banner-dot" class="dot" style="--tone:#fbbf24"></span><span id="banner-station-name">No station linked</span></span>
+        </div>
+      </div>
+
+      <!-- Empty state: shown while the account has no linked station -->
+      <div id="empty-note" class="tone-card tone-info empty-note hidden">
+        <div class="empty-ico">
+          <svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.3 3.9L2.4 17.5A2 2 0 004.1 20.5h15.8a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg>
+        </div>
+        <div class="empty-copy">
+          <h3>No stations linked yet</h3>
+          <p>The readings, cycle results and ledger below stay empty until you register a station. Link your ESP32 dry-fog unit to start collecting data.</p>
+        </div>
+        <button type="button" class="btn btn-sm" onclick="switchView('settings')">Register a station</button>
+      </div>
+
       <section class="grid-2">
         <!-- Cycle outcome -->
         <div class="panel panel-body">
@@ -788,13 +912,35 @@ tbody tr.expand td { background: var(--surface-sub); padding: 20px 28px; white-s
     </div>
 
     <!-- ============ VIEW 4: SETTINGS ============ -->
-    <div id="view-settings" class="hidden">
+    <div id="view-settings" class="hidden stack">
+      <div class="hero-banner">
+        <div id="reg-slideshow"></div>
+      </div>
+
+      <div id="reg-welcome" class="tone-card tone-info empty-note hidden">
+        <div class="empty-ico">
+          <svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        </div>
+        <div class="empty-copy">
+          <h3>You're signed in. One last step.</h3>
+          <p>No station is linked to this account yet, so your dashboard is empty. Register your first device below and it will appear on the Overview right away.</p>
+        </div>
+      </div>
+
       <div class="split">
         <aside class="panel split-aside">
           <div>
             <span class="eyebrow">Fleet Provisioning</span>
             <h2 class="page-title">Register Device</h2>
             <p class="sub" style="font-size:12px;margin-top:12px;line-height:1.7;">Bind new ESP32 dry-fog hardware units to your organization. Enter the factory-provisioned serial number and cryptographic authentication key.</p>
+          </div>
+          <div style="border-top:1px solid var(--border);padding-top:20px;display:flex;flex-direction:column;gap:16px;">
+            <span class="tiny-label">How it works</span>
+            <ol class="step-list">
+              <li>Enter the serial number printed on your ESP32 unit.</li>
+              <li>Add the secret key that came with the hardware.</li>
+              <li>Give the room a nickname, then register the station.</li>
+            </ol>
           </div>
           <div style="border-top:1px solid var(--border);padding-top:20px;display:flex;flex-direction:column;gap:12px;">
             <span class="tiny-label">Linked Stations</span>
@@ -850,70 +996,6 @@ const expandedRecordIds = new Set();
 
 const $ = (id) => document.getElementById(id);
 
-  // --- GOOGLE AUTHENTICATION INTEGRATION ---
-  // Paste your Client ID copied from Google Cloud Console inside the quotes below
-  const GOOGLE_CLIENT_ID = "844737309393-o2isok4bufbj8gdih11l8klaph3ksnsd.apps.googleusercontent.com";
-
-  function initGoogleAuth() {
-    if (typeof google === "undefined" || !google.accounts?.id) {
-      // Retry shortly if the Google library is still loading
-      setTimeout(initGoogleAuth, 200);
-      return;
-    }
-
-    google.accounts.id.initialize({
-      client_id: GOOGLE_CLIENT_ID,
-      callback: handleGoogleAuthCallback,
-      auto_select: false,
-      cancel_on_tap_outside: true
-    });
-
-    const btnBox = document.getElementById("google-signin-btn-box");
-    if (btnBox) {
-      google.accounts.id.renderButton(btnBox, {
-        type: "standard",
-        theme: document.documentElement.dataset.theme === "light" ? "outline" : "filled_black",
-        size: "large",
-        text: "signin_with",
-        shape: "rectangular",
-        logo_alignment: "left",
-        width: 380
-      });
-    }
-  }
-
-  async function handleGoogleAuthCallback(credentialResponse) {
-    const errBox = document.getElementById("login-error");
-    errBox?.classList.add("hidden");
-
-    try {
-      const res = await fetch(`${API_BASE}/api/v1/auth/google`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id_token: credentialResponse.credential })
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || "Google authentication failed on server.");
-      }
-
-      const data = await res.json();
-      localStorage.setItem(TOKEN_KEY, data.access_token);
-      showDashboard();
-    } catch (err) {
-      if (errBox) {
-        errBox.textContent = err.message;
-        errBox.classList.remove("hidden");
-      }
-    }
-  }
-
-  // Call Google Auth init on load
-  window.addEventListener("DOMContentLoaded", () => {
-    initGoogleAuth();
-  });
-
 function escapeHtml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -949,13 +1031,255 @@ function to12h(hhmm) {
   return `${((h + 11) % 12) + 1}:${String(m || 0).padStart(2, "0")} ${suffix}`;
 }
 
+/* ---------- TOAST ---------- */
+let toastTimer = null;
+function toast(message) {
+  let el = $("toast");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "toast"; el.className = "toast"; el.setAttribute("role", "status");
+    document.body.appendChild(el);
+  }
+  el.textContent = message;
+  requestAnimationFrame(() => el.classList.add("show"));
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 3400);
+}
+
+/* =========================================================
+   SLIDESHOWS
+   Each slide gets an original illustration. To use a real photo,
+   put the file in an "img" folder next to this page (img/login.jpg
+   and img/dashboard.jpg). It is picked up automatically; if the file
+   is missing, the illustration is shown instead.
+   ========================================================= */
+const LOGIN_SLIDES = [
+  { kind: "mist", photo: "img/login.jpg", eyebrow: "Dry-fog sanitation", title: "Sanitize on schedule, without lifting a finger.", text: "Plan autonomous misting cycles for every station and let SanMist handle the warnings, dosing and logging." },
+  { kind: "verify", eyebrow: "Compliance ledger", title: "Every cycle, verified and tamper-evident.", text: "Each run is written to a SHA-256 hash chain, so your audit trail is always ready to show." },
+  { kind: "telemetry", eyebrow: "Live telemetry", title: "Know your station's conditions in real time.", text: "Temperature, humidity, flow rate and HOCl level stream in continuously, color-coded at a glance." }
+];
+const DASH_SLIDES = [
+  { kind: "mist", photo: "img/dashboard.jpg", eyebrow: "Fleet overview", title: "Your stations, at a glance.", text: "Live readings, cycle outcomes and compliance status in one place." },
+  { kind: "telemetry", eyebrow: "Scheduling", title: "Automate your daily sanitation.", text: "Set the days, time and duration once. Pre-warning buzzers and the HOCl interlock run on every cycle." },
+  { kind: "verify", eyebrow: "Audit ledger", title: "Compliance you can prove.", text: "Export a PDF certificate or CSV straight from the tamper-evident ledger." }
+];
+const REG_SLIDES = [
+  { kind: "telemetry", photo: "img/dashboard.jpg", eyebrow: "Fleet provisioning", title: "Link your first station.", text: "Enter the serial number and secret key from your ESP32 unit, then name the room it sanitizes." }
+];
+
+let _artUid = 0;
+function seeded(seed) { let s = seed; return () => (s = (s * 16807) % 2147483647) / 2147483647; }
+
+function sceneSvg(kind, mode) {
+  const uid = `art${++_artUid}`;
+  const wide = mode === "wide";
+  const W = wide ? 1600 : 600, H = wide ? 400 : 800;
+  const P = {
+    mist: ["#0b3a8f", "#22d3ee", "#60a5fa"],
+    verify: ["#065f46", "#34d399", "#a7f3d0"],
+    telemetry: ["#4c1d95", "#a78bfa", "#fb923c"]
+  }[kind] || ["#0b3a8f", "#22d3ee", "#60a5fa"];
+  const rnd = seeded(({ mist: 11, verify: 23, telemetry: 37 }[kind] || 5) * (wide ? 3 : 5));
+  const fx = wide ? W * 0.8 : W * 0.5;
+  const fy = wide ? H * 0.52 : H * 0.34;
+  const sc = wide ? 1 : 1.3;
+  const line = `stroke="#fff" stroke-opacity=".92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"`;
+
+  let blobs = "";
+  for (let i = 0; i < 10; i++) {
+    const r = (wide ? 60 : 80) + rnd() * (wide ? 120 : 140);
+    blobs += `<circle cx="${(rnd() * W).toFixed(0)}" cy="${(rnd() * H).toFixed(0)}" r="${r.toFixed(0)}" fill="${P[i % 3]}" opacity="${(0.14 + rnd() * 0.22).toFixed(2)}"/>`;
+  }
+
+  let glyph = "";
+  if (kind === "mist") {
+    let plume = "", dots = "";
+    for (let k = 0; k < 5; k++) {
+      plume += `<circle cx="${((rnd() - 0.5) * 16).toFixed(0)}" cy="${38 - k * 30}" r="${14 + k * 11}" fill="${P[k % 2 ? 2 : 1]}" opacity="${(0.55 - k * 0.08).toFixed(2)}"/>`;
+    }
+    for (let k = 0; k < 24; k++) {
+      dots += `<circle cx="${((rnd() - 0.5) * 200).toFixed(0)}" cy="${(40 - rnd() * 170).toFixed(0)}" r="${(1.5 + rnd() * 3.5).toFixed(1)}" fill="#fff" opacity="${(0.25 + rnd() * 0.5).toFixed(2)}"/>`;
+    }
+    glyph = `<g filter="url(#${uid}b2)">${plume}</g>${dots}
+      <rect x="-36" y="62" width="72" height="34" rx="10" ${line}/>
+      <path d="M-18 62 L-12 38 H12 L18 62" ${line}/>
+      <path d="M-64 96 H64" ${line} stroke-opacity=".35"/>`;
+  } else if (kind === "verify") {
+    glyph = `<path d="M0 -92 L72 -64 V0 C72 48 40 80 0 96 C-40 80 -72 48 -72 0 V-64 Z" fill="${P[1]}" fill-opacity=".16" stroke="#fff" stroke-opacity=".92" stroke-width="3" stroke-linejoin="round"/>
+      <path d="M-28 4 L-8 26 L32 -22" fill="none" stroke="${P[2]}" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+      <rect x="-100" y="112" width="56" height="26" rx="13" ${line} stroke-opacity=".8"/>
+      <rect x="-28" y="112" width="56" height="26" rx="13" ${line} stroke-opacity=".8"/>
+      <rect x="44" y="112" width="56" height="26" rx="13" ${line} stroke-opacity=".8"/>
+      <path d="M-44 125 H-28 M28 125 H44" ${line} stroke-opacity=".8"/>`;
+  } else {
+    const wave = (a, ph, col, op) => {
+      let d = "";
+      for (let x = -120; x <= 120; x += 8) d += `${x === -120 ? "M" : "L"}${x} ${(-8 + a * Math.sin(x / 28 + ph)).toFixed(1)} `;
+      return `<path d="${d}" fill="none" stroke="${col}" stroke-opacity="${op}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>`;
+    };
+    let bars = "";
+    for (let i = 0; i < 9; i++) {
+      const h = 10 + rnd() * 34;
+      bars += `<rect x="${-112 + i * 28}" y="${(80 - h).toFixed(0)}" width="12" height="${h.toFixed(0)}" rx="4" fill="${P[2]}" opacity=".55"/>`;
+    }
+    glyph = `<rect x="-140" y="-90" width="280" height="180" rx="18" fill="${P[0]}" fill-opacity=".35" stroke="#fff" stroke-opacity=".5" stroke-width="2"/>
+      ${wave(34, 0, P[1], 1)}${wave(22, 1.6, P[2], 1)}${wave(14, 3, "#fff", 0.7)}${bars}`;
+  }
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="${wide ? "xMaxYMid" : "xMidYMid"} slice" aria-hidden="true" focusable="false">
+    <defs>
+      <radialGradient id="${uid}g" cx="${wide ? "80%" : "50%"}" cy="${wide ? "50%" : "34%"}" r="75%"><stop offset="0" stop-color="${P[0]}"/><stop offset="1" stop-color="#03040a"/></radialGradient>
+      <filter id="${uid}b" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="${wide ? 34 : 44}"/></filter>
+      <filter id="${uid}b2" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="9"/></filter>
+      <pattern id="${uid}p" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="#fff" stroke-opacity=".05"/></pattern>
+    </defs>
+    <rect width="${W}" height="${H}" fill="url(#${uid}g)"/>
+    <g filter="url(#${uid}b)">${blobs}</g>
+    <rect width="${W}" height="${H}" fill="url(#${uid}p)"/>
+    <g transform="translate(${fx} ${fy}) scale(${sc})">${glyph}</g>
+  </svg>`;
+}
+
+function mountSlideshow(root, slides, opts = {}) {
+  if (!root || !slides.length) return;
+  const mode = opts.mode || "wide";
+  root.className = "slideshow" + (mode === "wide" ? " compact" : "");
+  root.setAttribute("role", "region");
+  root.setAttribute("aria-roledescription", "carousel");
+
+  const art = (kind) => mode === "tall"
+    ? `<div class="slide-art art-tall">${sceneSvg(kind, "tall")}</div><div class="slide-art art-wide">${sceneSvg(kind, "wide")}</div>`
+    : `<div class="slide-art">${sceneSvg(kind, "wide")}</div>`;
+
+  root.innerHTML = slides.map((s, i) => `
+    <div class="slide${i === 0 ? " is-active" : ""}" aria-hidden="${i !== 0}">
+      ${art(s.kind)}
+      <div class="slide-photo"></div>
+      <div class="slide-shade"></div>
+      <div class="slide-copy">
+        <div class="slide-eyebrow">${escapeHtml(s.eyebrow)}</div>
+        <h3 class="slide-title">${escapeHtml(s.title)}</h3>
+        <p class="slide-text">${escapeHtml(s.text)}</p>
+      </div>
+    </div>`).join("") +
+    (slides.length > 1
+      ? `<div class="slide-dots">${slides.map((s, i) => `<button type="button" class="dot-btn${i === 0 ? " is-active" : ""}" aria-label="Show slide ${i + 1}"></button>`).join("")}</div>`
+      : "");
+
+  const els = root.querySelectorAll(".slide");
+  const dots = root.querySelectorAll(".dot-btn");
+
+  // Use a real photo when the file exists; otherwise keep the illustration
+  slides.forEach((s, i) => {
+    if (!s.photo) return;
+    const img = new Image();
+    img.onload = () => {
+      els[i].querySelector(".slide-photo").style.backgroundImage = `url("${s.photo}")`;
+      els[i].classList.add("has-photo");
+    };
+    img.src = s.photo;
+  });
+
+  let idx = 0, timer = null;
+  const go = (n) => {
+    idx = (n + slides.length) % slides.length;
+    els.forEach((el, i) => { el.classList.toggle("is-active", i === idx); el.setAttribute("aria-hidden", String(i !== idx)); });
+    dots.forEach((d, i) => d.classList.toggle("is-active", i === idx));
+  };
+  const stop = () => { clearInterval(timer); timer = null; };
+  const start = () => {
+    if (slides.length < 2 || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    stop();
+    timer = setInterval(() => go(idx + 1), opts.interval || 6500);
+  };
+  dots.forEach((d, i) => d.addEventListener("click", () => { go(i); start(); }));
+  root.addEventListener("mouseenter", stop);
+  root.addEventListener("mouseleave", start);
+  start();
+}
+
+/* =========================================================
+   GOOGLE SIGN-IN
+   ========================================================= */
+const GOOGLE_CLIENT_ID = "844737309393-o2isok4bufbj8gdih11l8klaph3ksnsd.apps.googleusercontent.com";
+let googleReady = false;
+let googleTries = 0;
+
+function renderGoogleButton() {
+  const box = $("google-signin-btn-box");
+  const target = $("google-render");
+  if (!box || !target || !googleReady) return;
+  const available = Math.floor(box.getBoundingClientRect().width) || 360;
+  target.innerHTML = "";
+  google.accounts.id.renderButton(target, {
+    type: "standard",
+    theme: document.documentElement.dataset.theme === "light" ? "outline" : "filled_black",
+    size: "large",
+    text: "continue_with",
+    shape: "rectangular",
+    logo_alignment: "left",
+    width: Math.max(200, Math.min(400, available))
+  });
+}
+
+function initGoogleAuth() {
+  if (typeof google === "undefined" || !google.accounts?.id) {
+    if (++googleTries > 40) {
+      $("google-signin-btn-box")?.classList.add("is-disabled");
+      const label = $("google-label");
+      if (label) label.textContent = "Google sign-in unavailable";
+      return;
+    }
+    setTimeout(initGoogleAuth, 200);
+    return;
+  }
+  google.accounts.id.initialize({
+    client_id: GOOGLE_CLIENT_ID,
+    callback: handleGoogleAuthCallback,
+    auto_select: false,
+    cancel_on_tap_outside: true
+  });
+  googleReady = true;
+  renderGoogleButton();
+}
+
+async function handleGoogleAuthCallback(credentialResponse) {
+  const errBox = $("login-error");
+  errBox?.classList.add("hidden");
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/auth/google`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id_token: credentialResponse.credential })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || "Google authentication failed on server.");
+    }
+    const data = await res.json();
+    localStorage.setItem(TOKEN_KEY, data.access_token);
+    showDashboard();
+  } catch (err) {
+    if (errBox) { errBox.textContent = err.message; errBox.classList.remove("hidden"); }
+  }
+}
+
+let googleResizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(googleResizeTimer);
+  googleResizeTimer = setTimeout(() => {
+    if (!$("login-overlay")?.classList.contains("hidden")) renderGoogleButton();
+  }, 250);
+});
+
 /* ---------- THEME ---------- */
 function applyTheme(theme) {
   const normalized = theme === "light" ? "light" : "dark";
   document.documentElement.dataset.theme = normalized;
-  $("icon-sun")?.classList.toggle("hidden", normalized !== "dark");
-  $("icon-moon")?.classList.toggle("hidden", normalized === "dark");
+  document.querySelectorAll(".js-icon-sun").forEach((el) => el.classList.toggle("hidden", normalized !== "dark"));
+  document.querySelectorAll(".js-icon-moon").forEach((el) => el.classList.toggle("hidden", normalized === "dark"));
   try { localStorage.setItem(THEME_KEY, normalized); } catch {}
+  renderGoogleButton();
 }
 function toggleColorTheme() {
   applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light");
@@ -1022,20 +1346,62 @@ async function authFetch(path, options = {}) {
 }
 
 /* ---------- FLEET ---------- */
+let hasDevices = null;          // null = not loaded yet
+let emptyRedirectDone = false;  // send brand-new accounts to registration only once per sign-in
+
+function updateBannerStation() {
+  const sel = $("global-station-selector");
+  const name = $("banner-station-name");
+  const dot = $("banner-dot");
+  if (!name) return;
+  if (hasDevices) {
+    name.textContent = sel?.selectedOptions[0]?.textContent || activeStation;
+    dot?.style.setProperty("--tone", "#34d399");
+  } else {
+    name.textContent = "No station linked";
+    dot?.style.setProperty("--tone", "#fbbf24");
+  }
+}
+
+function setNoDeviceState(isEmpty) {
+  hasDevices = !isEmpty;
+  $("empty-note")?.classList.toggle("hidden", !isEmpty);
+  $("reg-welcome")?.classList.toggle("hidden", !isEmpty);
+  $("view-overview")?.classList.toggle("is-empty", isEmpty);
+  $("btn-fab-start-cycle")?.classList.toggle("fab-hidden", isEmpty);
+  updateBannerStation();
+}
+
 async function loadFleetDevices() {
+  let devices;
   try {
     const res = await authFetch("/api/v1/user/admin/devices");
-    if (!res.ok) return;
-    const devices = await res.json();
-    const selector = $("global-station-selector");
-    const listContainer = $("device-list-container");
-    if (selector && devices.length > 0) {
+    if (res.status === 404) devices = [];
+    else if (!res.ok) return;
+    else devices = await res.json();
+  } catch (err) { return; }
+  if (!Array.isArray(devices)) return;
+
+  const selector = $("global-station-selector");
+  const listContainer = $("device-list-container");
+  const isEmpty = devices.length === 0;
+
+  if (selector) {
+    if (isEmpty) {
+      selector.innerHTML = `<option value="">No station linked</option>`;
+      activeStation = "";
+    } else {
+      const previous = activeStation;
       selector.innerHTML = devices.map((d) =>
         `<option value="${escapeHtml(d.serial_number)}">${escapeHtml(d.nickname)} (${escapeHtml(d.serial_number)})</option>`).join("");
+      if (devices.some((d) => d.serial_number === previous)) selector.value = previous;
       activeStation = selector.value;
     }
-    if (listContainer) {
-      listContainer.innerHTML = devices.map((d) => `
+  }
+  if (listContainer) {
+    listContainer.innerHTML = isEmpty
+      ? `<div class="card" style="text-align:center;font-size:12px;color:var(--text-muted);padding:22px;">No stations yet. Your first one will show up here.</div>`
+      : devices.map((d) => `
         <div class="card device-item">
           <div style="min-width:0;">
             <p style="font-size:13px;font-weight:600;">${escapeHtml(d.nickname)}</p>
@@ -1043,12 +1409,18 @@ async function loadFleetDevices() {
           </div>
           <span class="chip tone-pass"><span class="dot"></span>Linked</span>
         </div>`).join("");
-    }
-  } catch (err) {}
+  }
+
+  setNoDeviceState(isEmpty);
+  if (isEmpty && !emptyRedirectDone) {
+    emptyRedirectDone = true;
+    switchView("settings");
+  }
 }
 function onStationChanged(serial) {
   activeStation = serial;
   currentPage = 1;
+  updateBannerStation();
   refreshDashboard();
 }
 async function claimDevice() {
@@ -1062,10 +1434,17 @@ async function claimDevice() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username: "admin", serial_number: serial, auth_key: key, nickname })
     });
-    if (!res.ok) { const err = await res.json(); throw new Error(err.detail || "Registration failed"); }
-    alert("Device claimed successfully!");
+    if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || "Registration failed"); }
+    const wasEmpty = hasDevices === false;
     $("reg-serial").value = ""; $("reg-key").value = ""; $("reg-nickname").value = "";
     await loadFleetDevices();
+    if (wasEmpty && hasDevices) {
+      toast("Station registered. Taking you to your dashboard…");
+      refreshDashboard();
+      setTimeout(() => switchView("overview"), 1100);
+    } else {
+      toast("Station registered successfully.");
+    }
   } catch (err) { alert(`Error: ${err.message}`); }
 }
 
@@ -1103,6 +1482,7 @@ function updateScheduleSummary() {
   setTone(chip, pass ? "pass" : "warn");
 }
 async function saveSchedule() {
+  if (!activeStation) { toast("Register a station first to schedule cycles."); switchView("settings"); return; }
   const days = $("sched-days").value.trim();
   const time = $("sched-time").value.trim();
   const dur = parseInt($("sched-dur").value, 10);
@@ -1671,6 +2051,8 @@ function startCycleCountdown(durationSec) {
 function showDashboard() {
   $("login-overlay")?.classList.add("hidden");
   $("app-shell")?.classList.remove("hidden");
+  emptyRedirectDone = false;
+  switchView("overview");
   loadFleetDevices();
   refreshDashboard();
   if (!pollTimer) pollTimer = setInterval(refreshDashboard, 3000);
@@ -1678,8 +2060,10 @@ function showDashboard() {
 function showLoginOverlay() {
   clearInterval(pollTimer);
   pollTimer = null;
+  hasDevices = null;
   $("app-shell")?.classList.add("hidden");
   $("login-overlay")?.classList.remove("hidden");
+  renderGoogleButton();
 }
 function fillDemoCredentials(u, p) {
   $("login-username").value = u;
@@ -1788,6 +2172,10 @@ document.querySelectorAll(".pw-toggle").forEach((btn) => {
 // Close modal on backdrop click
 $("cycle-modal-overlay")?.addEventListener("click", (e) => { if (e.target === e.currentTarget) closeCycleModal(); });
 
+mountSlideshow($("login-slideshow"), LOGIN_SLIDES, { mode: "tall" });
+mountSlideshow($("dash-slideshow"), DASH_SLIDES, { mode: "wide" });
+mountSlideshow($("reg-slideshow"), REG_SLIDES, { mode: "wide" });
+initGoogleAuth();
 initTheme();
 renderDayChips();
 updateScheduleSummary();

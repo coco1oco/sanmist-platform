@@ -8,6 +8,10 @@ import secrets
 import sqlite3
 from typing import Optional
 
+import urllib.request
+from pydantic import BaseModel
+from fastapi import HTTPException
+
 import joblib
 import paho.mqtt.client as mqtt
 from fastapi import Depends, FastAPI, HTTPException, Response, status
@@ -417,9 +421,20 @@ def require_auth(
         )
 
     try:
-        expires_at = datetime.fromisoformat(session_row["expires_at"])
+        raw_exp = session_row["expires_at"]
+        if isinstance(raw_exp, str):
+            # Siguraduhing napapalitan ang Z ng +00:00 kung ISO string ito
+            expires_at = datetime.fromisoformat(raw_exp.replace("Z", "+00:00"))
+        else:
+            expires_at = raw_exp
+
+        # Kung walang timezone metadata ang nakuha mula sa database, lagyan ng UTC
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+        # Ngayon pareho na silang timezone-aware sa UTC
         is_expired = datetime.now(timezone.utc) >= expires_at
-    except ValueError:
+    except (ValueError, TypeError):
         is_expired = True
 
     if is_expired:
@@ -770,6 +785,7 @@ async def lifespan(_: FastAPI):
         pass
 
 
+
 # 7. FastAPI Application & Routes
 app = FastAPI(
     title="MistSan Telemetry & Compliance Ingestion Engine",
@@ -927,6 +943,57 @@ def login(credentials: LoginRequest) -> dict:
             "role": user_row["role"],
         },
     }
+
+
+class GoogleAuthPayload(BaseModel):
+    id_token: str
+
+@app.post("/api/v1/auth/google")
+def auth_google(payload: GoogleAuthPayload):
+    try:
+        # I-verify ang ID token gamit ang opisyal na tokeninfo endpoint ng Google
+        token_url = f"https://oauth2.googleapis.com/tokeninfo?id_token={payload.id_token}"
+        req = urllib.request.Request(token_url, headers={"User-Agent": "MistSan-Platform"})
+        with urllib.request.urlopen(req, timeout=10) as response:
+            google_data = json.loads(response.read().decode("utf-8"))
+
+        email = google_data.get("email")
+        full_name = google_data.get("name", email.split("@")[0] if email else "Operator")
+        sub = google_data.get("sub")
+
+        if not email:
+            raise HTTPException(status_code=400, detail="Invalid Google profile: Email missing.")
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Suriin kung rehistrado na ang user; kung hindi pa, i-save sa database
+        cursor.execute("SELECT id, username, full_name, role FROM users WHERE username = ?", (email,))
+        user = cursor.fetchone()
+
+        if not user:
+            cursor.execute("""
+                INSERT INTO users (username, password_hash, salt, full_name, role, created_at)
+                VALUES (?, ?, ?, ?, ?, datetime('now'))
+            """, (email, "GOOGLE_OAUTH", "OAUTH", full_name, "Operator"))
+            conn.commit()
+            user_profile = {"username": email, "full_name": full_name, "role": "Operator"}
+        else:
+            user_profile = {"username": user[1], "full_name": user[2], "role": user[3]}
+
+        # Gumawa ng session token
+        session_token = f"mistsan_g_{sub}"
+        cursor.execute("""
+            INSERT OR REPLACE INTO auth_sessions (token, username, full_name, role, created_at, expires_at)
+            VALUES (?, ?, ?, ?, datetime('now'), datetime('now', '+7 days'))
+        """, (session_token, user_profile["username"], user_profile["full_name"], user_profile["role"]))
+
+        conn.commit()
+        conn.close()
+
+        return {"access_token": session_token, "user": user_profile}
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Google Authentication Failed: {str(e)}")
 
 
 @app.post("/api/v1/auth/logout")
