@@ -14,7 +14,13 @@ from fastapi import Depends, FastAPI, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
-import xgboost as xgb
+try:
+    import xgboost as xgb
+    XGB_AVAILABLE = True
+except Exception as e:
+    xgb = None
+    XGB_AVAILABLE = False
+    print(f"[WARN] XGBoost/Pandas C-extension failed to load on this Python runtime ({e}). Running with rule-based SEI fallback.")
 
 # 1. Paths & Configuration
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -291,15 +297,61 @@ def init_db() -> None:
         )
     """)
 
+    # --- Multi-Device & Serial Number Management ---
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS devices (
+            serial_number TEXT PRIMARY KEY,
+            model_name TEXT NOT NULL DEFAULT 'MistSan Standard',
+            auth_key TEXT NOT NULL DEFAULT 'sanmist-edge-key-2026',
+            is_claimed INTEGER NOT NULL DEFAULT 0,
+            registered_at TEXT NOT NULL
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_devices (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            serial_number TEXT NOT NULL,
+            nickname TEXT NOT NULL,
+            room_volume_m3 REAL DEFAULT 1.0,
+            paired_at TEXT NOT NULL,
+            FOREIGN KEY (serial_number) REFERENCES devices(serial_number) ON DELETE CASCADE
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS device_schedules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            serial_number TEXT NOT NULL,
+            days_of_week TEXT NOT NULL DEFAULT 'MON,TUE,WED,THU,FRI,SAT,SUN',
+            start_time_pht TEXT NOT NULL,
+            duration_sec INTEGER NOT NULL DEFAULT 32,
+            dosage_ml REAL NOT NULL DEFAULT 10.0,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            FOREIGN KEY (serial_number) REFERENCES devices(serial_number) ON DELETE CASCADE
+        )
+    """)
+
+    # Seed the current simulation station so Wokwi stays paired and working immediately
+    cursor.execute("""
+        INSERT OR IGNORE INTO devices (serial_number, model_name, auth_key, is_claimed, registered_at)
+        VALUES ('MIST-BOH-01', 'MistSan Station BOH Pro', 'sanmist-edge-key-2026', 1, datetime('now'))
+    """)
+
+    # Link MIST-BOH-01 to your default admin account
+    cursor.execute("""
+        INSERT OR IGNORE INTO user_devices (id, user_id, serial_number, nickname, room_volume_m3, paired_at)
+        VALUES (1, 'admin', 'MIST-BOH-01', 'Kitchen Prep Area', 1.0, datetime('now'))
+    """)
+
     _seed_default_users(cursor)
 
     conn.commit()
     conn.close()
     print(f"[DB] Initialized/verified schema at: {DB_PATH}")
 
-
 init_db()
-
 
 # 4. Request & Auth Schemas
 class CycleTelemetryInput(BaseModel):
@@ -735,6 +787,87 @@ app.add_middleware(
     expose_headers=["X-Total-Count", "X-Filtered-Count"],
 )
 
+# ==========================================
+# MULTI-DEVICE & SCHEDULE MANAGEMENT ENDPOINTS
+# ==========================================
+
+from pydantic import BaseModel
+from typing import Optional
+
+class ClaimDevicePayload(BaseModel):
+    username: str
+    serial_number: str
+    auth_key: str
+    nickname: str
+    room_volume_m3: float = 1.0
+
+class SchedulePayload(BaseModel):
+    serial_number: str
+    days_of_week: str
+    start_time_pht: str
+    duration_sec: int
+    dosage_ml: float
+
+@app.get("/api/v1/user/{username}/devices")
+def get_user_devices(username: str):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT ud.serial_number, ud.nickname, ud.room_volume_m3, d.model_name
+        FROM user_devices ud
+        JOIN devices d ON ud.serial_number = d.serial_number
+        WHERE ud.user_id = ?
+    """, (username,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        {
+            "serial_number": row[0],
+            "nickname": row[1],
+            "room_volume_m3": row[2],
+            "model_name": row[3]
+        }
+        for row in rows
+    ]
+
+@app.post("/api/v1/devices/claim")
+def claim_device(payload: ClaimDevicePayload):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # 1. Verify serial number exists in registry
+    cursor.execute("SELECT auth_key, is_claimed FROM devices WHERE serial_number = ?", (payload.serial_number,))
+    device = cursor.fetchone()
+    if not device:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Serial number not recognized in registry.")
+    
+    if device[0] != payload.auth_key:
+        conn.close()
+        raise HTTPException(status_code=401, detail="Invalid Device Authentication Key.")
+
+    # 2. Bind to user account
+    cursor.execute("""
+        INSERT INTO user_devices (user_id, serial_number, nickname, room_volume_m3, paired_at)
+        VALUES (?, ?, ?, ?, datetime('now'))
+    """, (payload.username, payload.serial_number, payload.nickname, payload.room_volume_m3))
+    
+    cursor.execute("UPDATE devices SET is_claimed = 1 WHERE serial_number = ?", (payload.serial_number,))
+    conn.commit()
+    conn.close()
+    return {"status": "SUCCESS", "serial_number": payload.serial_number}
+
+@app.post("/api/v1/schedules")
+def create_schedule(payload: SchedulePayload):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO device_schedules (serial_number, days_of_week, start_time_pht, duration_sec, dosage_ml, is_active)
+        VALUES (?, ?, ?, ?, ?, 1)
+    """, (payload.serial_number, payload.days_of_week, payload.start_time_pht, payload.duration_sec, payload.dosage_ml))
+    conn.commit()
+    conn.close()
+    return {"status": "SCHEDULE_SAVED"}
 
 @app.get("/")
 def health_check() -> dict:
@@ -953,3 +1086,17 @@ def trigger_cycle(req: CycleTriggerRequest, user: dict = Depends(require_auth)) 
         "room_volume_m3": req.room_volume_m3,
         "triggered_by": user["username"],
     }
+
+@app.post("/api/v1/control/estop")
+def emergency_stop_cycle():
+        """Broadcasts a STOP command to MQTT control topic to abort active cycles immediately."""
+        abort_payload = {
+            "command": "STOP",
+            "station_id": "MIST-BOH-01",
+            "triggered_by": "ui_operator",
+            "auth_key": MQTT_DEVICE_KEY,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        mqtt_client.publish(MQTT_CONTROL_TOPIC, json.dumps(abort_payload))
+        print("[MQTT CONTROL] Broadcasted emergency STOP command to all stations.")
+        return {"status": "HALTED", "message": "Emergency abort command dispatched."}

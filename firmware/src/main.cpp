@@ -41,6 +41,10 @@ const char* telemetry_topic = "sanmist/devices/MIST-BOH-01/telemetry";
 const char* status_topic = "sanmist/devices/MIST-BOH-01/status";
 const char* control_topic = "sanmist/control/trigger";
 
+// Forward declarations for compiler scope resolution
+void runSanitizationCycle(unsigned long durationMs, float roomVol);
+void publishTelemetry(float temp, float hum, float flow, float durationSec, float roomVol, bool estop);
+
 WiFiClient espClient;
 PubSubClient client(espClient);
 
@@ -61,48 +65,44 @@ void IRAM_ATTR handleEmergencyStop() {
 // Inbound MQTT Message Listener (Remote Dispatch)
 // -------------------------------------------------------------
 void onMqttMessage(char* topic, byte* payload, unsigned int length) {
-    char message[256];
-    size_t copyLen = (length < sizeof(message) - 1) ? length : (sizeof(message) - 1);
-    memcpy(message, payload, copyLen);
-    message[copyLen] = '\0';
+    char jsonBuffer[512];
+    if (length >= sizeof(jsonBuffer)) {
+        length = sizeof(jsonBuffer) - 1;
+    }
+    memcpy(jsonBuffer, payload, length);
+    jsonBuffer[length] = '\0';
 
-    Serial.print("[MQTT INBOUND] Topic: ");
-    Serial.println(topic);
-    Serial.print("[MQTT INBOUND] Payload: ");
-    Serial.println(message);
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, jsonBuffer);
+    if (error) {
+        Serial.print("[MQTT] JSON parse failed: ");
+        Serial.println(error.c_str());
+        return;
+    }
 
-    if (String(topic) == control_topic) {
-        JsonDocument doc;
-        DeserializationError error = deserializeJson(doc, payload, length);
+    const char* command = doc["command"] | "";
 
-        if (!error) {
-            const char* incomingKey = doc["auth_key"] | "";
-            if (strlen(device_auth_key) > 0 && strcmp(incomingKey, device_auth_key) != 0) {
-                Serial.println("[MQTT AUTH] Rejected trigger: invalid or missing auth_key.");
-                return;
-            }
-            const char* command = doc["command"];
-            if (command && strcmp(command, "START") == 0) {
-                if (cycleInProgress) {
-                    Serial.println("[REMOTE TRIGGER] Ignored: cycle already in progress.");
-                    return;
-                }
+    // 1. Handle Remote UI Emergency Stop
+    if (strcmp(command, "STOP") == 0) {
+        Serial.println("[HALT] Remote UI Emergency Stop received!");
+        estop_active = true;
+        digitalWrite(PIN_ATOMIZER, LOW);
+        digitalWrite(PIN_BUZZER, LOW);
+        return;
+    }
 
-                int durationSec = doc["duration_sec"] | 30;
-                float roomVol = doc["room_volume_m3"] | 1.0f;
-
-                remoteMistDurationMs = (unsigned long)durationSec * 1000UL;
-                remoteRoomVolumeM3 = roomVol;
-                remoteTriggerRequested = true;
-
-                Serial.println("==================================================");
-                Serial.printf("[REMOTE TRIGGER] Accepted! Duration: %d s | Vol: %.2f m3\n", durationSec, roomVol);
-                Serial.println("==================================================");
-            }
-        } else {
-            Serial.print("[ERROR] Deserialization failed: ");
-            Serial.println(error.f_str());
+    // 2. Handle Remote Trigger START
+    if (strcmp(command, "START") == 0) {
+        if (cycleInProgress) {
+            Serial.println("[WARN] Trigger ignored: Cycle already in progress.");
+            return;
         }
+        int durationSec = doc["duration_sec"] | 30;
+        float roomVol = doc["room_volume_m3"] | 1.0f;
+        Serial.print("[REMOTE TRIGGER] Accepted! Duration: ");
+        Serial.print(durationSec);
+        Serial.println(" s");
+        runSanitizationCycle(durationSec * 1000UL, roomVol);
     }
 }
 
