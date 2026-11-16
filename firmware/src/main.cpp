@@ -223,10 +223,22 @@ void publishTelemetry(float temp, float hum, float flow, float duration, float r
     doc["auth_key"] = device_auth_key;
 
     char buffer[384];
+    char buffer[384];
     serializeJson(doc, buffer, sizeof(buffer));
-    client.publish(telemetry_topic, buffer);
-    Serial.print("[MQTT PUB] Sent Payload: ");
-    Serial.println(buffer);
+
+    // Ensure MQTT is connected before transmitting completion payload
+    if (!client.connected()) {
+        reconnectMQTT();
+    }
+
+    bool sent = client.publish(telemetry_topic, buffer);
+    if (sent) {
+        Serial.print("[MQTT PUB SUCCESS] Sent Payload: ");
+        Serial.println(buffer);
+    } else {
+        Serial.print("[MQTT PUB FAILED] Could not send payload (check buffer size): ");
+        Serial.println(buffer);
+    }
 }
 
 void runSanitizationCycle(unsigned long durationMs, float roomVol) {
@@ -317,6 +329,7 @@ void setup() {
     setupWiFi();
     client.setServer(mqtt_server_host, mqtt_port);
     client.setCallback(onMqttMessage);
+    client.setBufferSize(512);
 
     Serial.println("--- MistSan ESP32 Firmware Ready ---");
 }
