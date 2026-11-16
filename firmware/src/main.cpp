@@ -210,33 +210,35 @@ void reconnectMQTT() {
     }
 }
 
-void publishTelemetry(float temp, float hum, float flow, float duration, float roomVol, bool estop) {
+void publishTelemetry(float temp, float hum, float flow, float durationSec, float roomVol, bool estop) {
+    client.setBufferSize(512);
+
+    // CRITICAL: Reconnect BEFORE publishing if the connection dropped during misting
+    if (!client.connected()) {
+        Serial.println("[MQTT] Socket disconnected during misting! Reconnecting before publish...");
+        reconnectMQTT();
+    }
+
     JsonDocument doc;
     doc["station_id"] = "MIST-BOH-01";
-    doc["ambient_temp_c"] = temp;
-    doc["relative_humidity_pct"] = hum;
-    doc["flow_rate_ml_min"] = flow;
-    doc["cycle_duration_sec"] = duration;
+    doc["ambient_temp_c"] = isnan(temp) ? 25.0f : temp;
+    doc["relative_humidity_pct"] = isnan(hum) ? 65.0f : hum;
+    doc["flow_rate_ml_min"] = (estop) ? 0.0f : flow;
+    doc["cycle_duration_sec"] = durationSec;
     doc["room_volume_m3"] = roomVol;
     doc["delivery_confirmed"] = (flow > 5.0f && !estop);
     doc["estop_triggered"] = estop;
     doc["auth_key"] = device_auth_key;
 
     char buffer[384];
-    char buffer[384];
     serializeJson(doc, buffer, sizeof(buffer));
-
-    // Ensure MQTT is connected before transmitting completion payload
-    if (!client.connected()) {
-        reconnectMQTT();
-    }
 
     bool sent = client.publish(telemetry_topic, buffer);
     if (sent) {
         Serial.print("[MQTT PUB SUCCESS] Sent Payload: ");
         Serial.println(buffer);
     } else {
-        Serial.print("[MQTT PUB FAILED] Could not send payload (check buffer size): ");
+        Serial.print("[MQTT PUB FAILED] Dropped payload: ");
         Serial.println(buffer);
     }
 }
@@ -250,68 +252,79 @@ void runSanitizationCycle(unsigned long durationMs, float roomVol) {
     float latestHum = 65.0f;
     readSanitizedEnvironment(latestTemp, latestHum);
 
+    // --- Pre-Cycle Warning Phase (1 second audible alarm) ---
     Serial.println("[START] Pre-cycle audible warning initiated...");
     tone(PIN_BUZZER, BUZZER_FREQ_HZ);
 
-    // Non-blocking 1-second pre-warning check for E-Stop
     unsigned long bzStart = millis();
     while (millis() - bzStart < 1000) {
-        if (estop_active) {
+        // Check physical pin or ISR flag
+        if (estop_active || digitalRead(PIN_BTN_ESTOP) == LOW) {
+            estop_active = true;
             noTone(PIN_BUZZER);
             digitalWrite(PIN_BUZZER, LOW);
             Serial.println("[HALT] E-Stop triggered during pre-cycle warning!");
-            publishTelemetry(latestTemp, latestHum, 0, (millis() - cycleStart) / 1000.0f, roomVol, true);
+            publishTelemetry(latestTemp, latestHum, 0.0f, (millis() - cycleStart) / 1000.0f, roomVol, true);
             cycleInProgress = false;
             return;
         }
+        client.loop(); // Keep MQTT alive during warning
         delay(10);
     }
     noTone(PIN_BUZZER);
     digitalWrite(PIN_BUZZER, LOW);
 
+    // --- Active Misting Phase ---
     Serial.println("[MISTING] Atomizer active...");
     digitalWrite(PIN_ATOMIZER, HIGH);
 
     unsigned long mistStart = millis();
-    float totalFlow = 0;
+    float totalFlow = 0.0f;
     int samples = 0;
 
     while (millis() - mistStart < durationMs) {
-        if (estop_active) {
+        // Poll emergency stop button
+        if (estop_active || digitalRead(PIN_BTN_ESTOP) == LOW) {
+            estop_active = true;
             Serial.println("[HALT] EMERGENCY STOP ACTIVATED DURING MISTING!");
             digitalWrite(PIN_ATOMIZER, LOW);
             readSanitizedEnvironment(latestTemp, latestHum);
-            publishTelemetry(latestTemp, latestHum, 0, (millis() - mistStart) / 1000.0f, roomVol, true);
+            float earlyDuration = (millis() - mistStart) / 1000.0f;
+            publishTelemetry(latestTemp, latestHum, 0.0f, earlyDuration, roomVol, true);
             cycleInProgress = false;
             return;
         }
 
+        // Read atomizer flow proxy via potentiometer
         int potValue = analogRead(PIN_POT);
-        float currentFlow = map(potValue, 0, 4095, 10, 50); // mL/min proxy
+        float currentFlow = (float)map(potValue, 0, 4095, 10, 50); // mL/min proxy
         totalFlow += currentFlow;
         samples++;
 
-        // Sample DHT22 periodically (~2s cadence matches DHT22 spec)
+        // Sample DHT22 environment sensor periodically (~2 sec cadence)
         if (samples % 20 == 0) {
             readSanitizedEnvironment(latestTemp, latestHum);
         }
 
-        // Keep MQTT connection alive and ignore mid-cycle remote triggers
+        // Keep MQTT connection alive to prevent broker timeout
         client.loop();
         delay(100);
     }
 
+    // --- Completion Phase ---
     digitalWrite(PIN_ATOMIZER, LOW);
+    cycleInProgress = false;
     Serial.println("[COMPLETE] Sanitization cycle finished!");
 
-    float avgFlow = (samples > 0) ? (totalFlow / samples) : 0;
+    float actualDurationSec = (millis() - mistStart) / 1000.0f;
+    float avgFlow = (samples > 0) ? (totalFlow / samples) : 0.0f;
     readSanitizedEnvironment(latestTemp, latestHum);
+
     lastReportedTemp = latestTemp;
     lastReportedHum = latestHum;
     lastReportedFlow = avgFlow;
 
-    publishTelemetry(latestTemp, latestHum, avgFlow, durationMs / 1000.0f, roomVol, false);
-    cycleInProgress = false;
+    publishTelemetry(latestTemp, latestHum, avgFlow, actualDurationSec, roomVol, false);
 }
 
 void setup() {
