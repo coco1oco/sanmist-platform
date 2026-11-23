@@ -1311,6 +1311,13 @@ if os.path.exists(FRONTEND_DIR):
             return FileResponse(privacy_path)
         raise HTTPException(status_code=404, detail="Privacy policy not found")
 
+    @app.get("/terms")
+    def serve_terms():
+        terms_path = os.path.join(FRONTEND_DIR, "terms.html")
+        if os.path.exists(terms_path):
+            return FileResponse(terms_path)
+        raise HTTPException(status_code=404, detail="Terms of service not found")
+
     @app.get("/")
     def serve_frontend():
         index_path = os.path.join(FRONTEND_DIR, "index.html")
