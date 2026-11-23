@@ -51,7 +51,7 @@
       --row-hover: rgba(255, 255, 255, 0.04);
       --shadow: 0 0 0 1px rgba(255, 255, 255, 0.03), 0 24px 48px -24px rgba(0, 0, 0, 0.9);
     }
-    :root[data-theme="light"] {
+    :root[data-theme="light"], #landing, #quote-modal, #login-overlay {
       color-scheme: light;
       --bg: #f4f6fa;
       --surface: #ffffff;
@@ -79,6 +79,7 @@
       --overlay: rgba(15, 23, 42, 0.45);
       --row-hover: rgba(15, 23, 42, 0.035);
       --shadow: 0 18px 40px -22px rgba(15, 23, 42, 0.22);
+      color: var(--text);
     }
 
     *, *::before, *::after { box-sizing: border-box; }
@@ -602,10 +603,6 @@
           <a href="#faq">FAQ</a>
         </nav>
         <div class="lp-actions">
-          <button type="button" class="icon-btn" onclick="toggleColorTheme()" title="Toggle Light/Dark Theme" aria-label="Toggle theme">
-            <svg class="js-icon-sun hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
-            <svg class="js-icon-moon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
-          </button>
           <button type="button" class="btn-ghost" onclick="showSignIn()">Sign in</button>
           <button type="button" class="btn btn-sm" onclick="openQuote()">Request a quote</button>
         </div>
@@ -866,14 +863,8 @@
     </section>
     <section class="login-side">
       <div class="login-top">
-        <div class="login-top-left">
-          <div class="brand"><img class="brand-mark" src="img/logo.png" alt="" decoding="async" /><span class="brand-name">SanMist Fleet</span></div>
-          <button type="button" class="btn-ghost" onclick="showLanding()">Back to home</button>
-        </div>
-        <button type="button" class="icon-btn" onclick="toggleColorTheme()" title="Toggle Light/Dark Theme" aria-label="Toggle theme">
-          <svg class="js-icon-sun hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
-          <svg class="js-icon-moon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
-        </button>
+        <div class="brand"><img class="brand-mark" src="img/logo.png" alt="" decoding="async" /><span class="brand-name">SanMist Fleet</span></div>
+        <button type="button" class="btn-ghost" onclick="showLanding()">Back to home</button>
       </div>
       <div class="login-body">
         <div class="login-card">
@@ -1655,7 +1646,7 @@
       target.innerHTML = "";
       google.accounts.id.renderButton(target, {
         type: "standard",
-        theme: document.documentElement.dataset.theme === "light" ? "outline" : "filled_black",
+        theme: "outline",
         size: "large",
         text: "continue_with",
         shape: "rectangular",
