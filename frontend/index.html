@@ -4,6 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SanMist Fleet Command &amp; Compliance Ledger</title>
+  <meta name="sanmist-api-base" content="" />
+  <link rel="icon" type="image/png" href="img/logo.png" />
+  <link rel="shortcut icon" type="image/png" href="img/logo.png" />
   
   <!-- Google Identity Services -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -143,7 +146,7 @@
     .input:focus { outline: none; border-color: var(--border-focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--border-focus) 25%, transparent); }
     .input-sm { padding: 8px 12px; font-size: 12px; width: auto; }
     .input-unit { position: relative; }
-    .input-unit .input { padding-right: 52px; text-align: right; }
+    .input-unit .input { padding-right: 52px; text-align: left; }
     .input-unit .unit { position: absolute; right: 18px; top: 50%; transform: translateY(-50%); font-size: 12px; color: var(--text-muted); pointer-events: none; }
 
     .btn {
@@ -170,20 +173,20 @@
     .shell { min-height: 100vh; display: flex; flex-direction: column; }
     .topbar {
       position: sticky; top: 0; z-index: 30;
-      display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px 24px;
-      padding: 16px 40px; background: color-mix(in srgb, var(--surface) 92%, transparent);
+      display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px 16px;
+      padding: 12px 24px; background: color-mix(in srgb, var(--surface) 92%, transparent);
       backdrop-filter: blur(12px); border-bottom: 1px solid var(--border);
     }
-    .brand { display: flex; align-items: center; gap: 12px; }
-    .brand-mark { width: 32px; height: 32px; border-radius: 10px; background: linear-gradient(135deg, #2563eb, #6366f1); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; }
-    .brand-name { font-size: 14px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
-    .topbar-left, .topbar-right { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-    .station-select { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-radius: 12px; border: 1px solid var(--border-strong); background: var(--surface-card); }
-    .station-select select { background: transparent; border: 0; font-size: 12px; font-weight: 600; outline: none; cursor: pointer; color: var(--text); }
+    .brand { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+    .brand-mark { width: 38px; height: 38px; border-radius: 50%; object-fit: contain; display: block; flex-shrink: 0; }
+    .brand-name { font-size: 14px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; }
+    .topbar-left, .topbar-right { display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; }
+    .station-select { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 12px; border: 1px solid var(--border-strong); background: var(--surface-card); max-width: 290px; }
+    .station-select select { background: transparent; border: 0; font-size: 12px; font-weight: 600; outline: none; cursor: pointer; color: var(--text); max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .station-select select option { background: var(--surface-card); color: var(--text); }
     .nav { display: flex; align-items: center; gap: 4px; padding: 4px; border-radius: 14px; background: var(--surface-sub); }
     .nav-pill {
-      padding: 8px 20px; font-size: 13px; font-weight: 500; color: var(--text-muted);
+      padding: 8px 14px; font-size: 13px; font-weight: 500; color: var(--text-muted); white-space: nowrap;
       border-radius: 10px; border: 0; background: transparent; transition: all .15s ease;
     }
     .nav-pill:hover { color: var(--text); }
@@ -287,10 +290,10 @@
 
     /* Modals & FAB */
     #btn-fab-start-cycle {
-      position: fixed; bottom: 28px; right: 28px; z-index: 40;
-      display: flex; align-items: center; gap: 10px; padding: 14px 26px; border-radius: 9999px;
-      background: #0071e3; color: #fff; font-size: 13px; font-weight: 600;
-      border: 1px solid rgba(255,255,255,.25); box-shadow: 0 12px 28px -6px rgba(0,113,227,.55);
+      position: fixed; bottom: 16px; right: 16px; z-index: 40;
+      display: flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 9999px;
+      background: #0071e3; color: #fff; font-size: 12px; font-weight: 600;
+      border: 1px solid rgba(255,255,255,.25); box-shadow: 0 10px 24px -6px rgba(0,113,227,.55);
       transition: all .2s ease;
     }
     #btn-fab-start-cycle:hover { transform: translateY(-2px); }
@@ -370,7 +373,7 @@
     .google-custom { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 12px; border-radius: 14px; font-size: 14px; font-weight: 600; color: var(--text); background: var(--surface-card); border: 1px solid var(--border-strong); transition: all .15s ease; }
     .google-box:hover .google-custom { background: var(--surface-sub); border-color: var(--text-muted); transform: translateY(-1px); }
     .google-box.is-disabled .google-custom { opacity: .5; }
-    .google-overlay { position: absolute; inset: 0; overflow: hidden; opacity: 0.01; display: flex; align-items: center; justify-content: center; border-radius: 14px; }
+    .google-overlay { position: absolute; inset: 0; overflow: hidden; opacity: 0.001; display: flex; align-items: center; justify-content: center; border-radius: 14px; }
     .google-overlay > * { transform: scaleY(1.3); transform-origin: center; flex-shrink: 0; }
     .or-divider { display: flex; align-items: center; gap: 14px; font-size: 10px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--text-muted); }
     .or-divider::before, .or-divider::after { content: ""; flex: 1; height: 1px; background: var(--border-strong); }
@@ -414,8 +417,8 @@
     .photo-slot { position: relative; overflow: hidden; isolation: isolate; background: #04050a; }
     .photo-slot .slide-photo { transform: none; transition: opacity .8s ease; }
     .photo-slot.has-photo .slide-photo { opacity: 1; }
-    .lp-nav { position: fixed; top: 0; left: 0; right: 0; z-index: 40; border-bottom: 1px solid transparent; transition: background .25s ease, border-color .25s ease, backdrop-filter .25s ease; }
-    .lp-nav.scrolled { background: color-mix(in srgb, var(--bg) 84%, transparent); backdrop-filter: blur(14px); border-color: var(--border); }
+    .lp-nav { position: fixed; top: 0; left: 0; right: 0; z-index: 40; border-bottom: 1px solid transparent; background: linear-gradient(180deg, color-mix(in srgb, var(--bg) 82%, transparent) 0%, transparent 100%); transition: background .25s ease, border-color .25s ease, backdrop-filter .25s ease; }
+    .lp-nav.scrolled { background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(14px); border-color: var(--border); }
     .lp-nav-in { display: flex; align-items: center; justify-content: space-between; gap: 24px; height: 76px; }
     .lp-brand { text-decoration: none; }
     .lp-links { display: flex; align-items: center; gap: 4px; }
@@ -424,6 +427,7 @@
     .lp-actions { display: flex; align-items: center; gap: 10px; }
     .lp-hero { position: relative; min-height: 820px; display: flex; align-items: center; padding: 140px 0 150px; overflow: hidden; }
     .hero-bleed { position: absolute; top: 0; right: 0; bottom: 0; width: 56%; z-index: 0; -webkit-mask-image: linear-gradient(90deg, transparent 8%, #000 46%), linear-gradient(180deg, #000 80%, transparent); mask-image: linear-gradient(90deg, transparent 8%, #000 46%), linear-gradient(180deg, #000 80%, transparent); }
+    .hero-bleed::after { content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none; background: linear-gradient(90deg, color-mix(in srgb, var(--bg) 88%, transparent) 0%, color-mix(in srgb, var(--bg) 42%, transparent) 42%, transparent 80%), linear-gradient(180deg, color-mix(in srgb, var(--bg) 72%, transparent) 0%, transparent 28%); }
     .hero-bleed .slide-photo { background-position: center right; }
     .lp-hero-inner { position: relative; z-index: 2; }
     .lp-hero-copy { max-width: 600px; }
@@ -591,7 +595,7 @@
     <header class="lp-nav">
       <div class="lp-wrap lp-nav-in">
         <a class="brand lp-brand" href="#top" aria-label="SanMist home">
-          <span class="brand-mark">S</span><span class="brand-name">SanMist</span>
+          <img class="brand-mark" src="img/logo.png" alt="" decoding="async" /><span class="brand-name">SanMist</span>
         </a>
         <nav class="lp-links" aria-label="Sections">
           <a href="#features">Features</a>
@@ -802,7 +806,7 @@
     <footer class="lp-footer">
       <div class="lp-wrap lp-foot-grid">
         <div>
-          <div class="brand"><span class="brand-mark">S</span><span class="brand-name" style="color:#fff;">SanMist</span></div>
+          <div class="brand"><img class="brand-mark" src="img/logo.png" alt="" decoding="async" /><span class="brand-name" style="color:#fff;">SanMist</span></div>
           <p class="foot-blurb">Automated dry-fog sanitation for commercial kitchens, with a platform that keeps the record.</p>
         </div>
         <div>
@@ -863,7 +867,7 @@
     <section class="login-side">
       <div class="login-top">
         <div class="login-top-left">
-          <div class="brand"><span class="brand-mark">S</span><span class="brand-name">SanMist Fleet</span></div>
+          <div class="brand"><img class="brand-mark" src="img/logo.png" alt="" decoding="async" /><span class="brand-name">SanMist Fleet</span></div>
           <button type="button" class="btn-ghost" onclick="showLanding()">Back to home</button>
         </div>
         <button type="button" class="icon-btn" onclick="toggleColorTheme()" title="Toggle Light/Dark Theme" aria-label="Toggle theme">
@@ -1003,7 +1007,7 @@
   <div id="app-shell" class="shell hidden">
     <header class="topbar">
       <div class="topbar-left">
-        <div class="brand"><span class="brand-mark">S</span><span class="brand-name">SanMist</span></div>
+        <div class="brand"><img class="brand-mark" src="img/logo.png" alt="" decoding="async" /><span class="brand-name">SanMist</span></div>
         <div class="station-select">
           <span class="tiny-label">Station</span>
           <select id="global-station-selector" class="mono" onchange="onStationChanged(this.value)">
@@ -1131,6 +1135,10 @@
                 <div class="link-row tone-pass" id="row-ledger">
                   <span class="muted">SHA-256 Ledger Chain</span>
                   <span class="val mono"><span class="dot"></span><span id="ledger-integrity-badge">Verified</span></span>
+                </div>
+                <div class="link-row tone-pass" id="row-fleet">
+                  <span class="muted">Attached Fleet Health</span>
+                  <span class="val mono"><span class="dot"></span><span id="fleet-health-summary">--</span></span>
                 </div>
               </div>
             </div>
@@ -1332,9 +1340,26 @@
 
   <!-- ================= JAVASCRIPT ================= -->
   <script>
-    const API_BASE = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-      ? "http://localhost:8000"
-      : `${window.location.protocol}//${window.location.host}`;
+    const API_BASE = (() => {
+      try {
+        const q = new URLSearchParams(window.location.search).get("api");
+        if (q && /^https?:\/\//i.test(q.trim())) {
+          const clean = q.trim().replace(/\/+$/, "");
+          localStorage.setItem("sanmist_api_base", clean);
+          return clean;
+        }
+        const meta = document.querySelector('meta[name="sanmist-api-base"]')?.getAttribute("content")?.trim();
+        if (meta && /^https?:\/\//i.test(meta)) return meta.replace(/\/+$/, "");
+        if (window.SANMIST_API_BASE && /^https?:\/\//i.test(String(window.SANMIST_API_BASE))) {
+          return String(window.SANMIST_API_BASE).replace(/\/+$/, "");
+        }
+        const stored = localStorage.getItem("sanmist_api_base");
+        if (stored && /^https?:\/\//i.test(stored)) return stored.replace(/\/+$/, "");
+      } catch (_) {}
+      return (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+        ? "http://localhost:8000"
+        : `${window.location.protocol}//${window.location.host}`;
+    })();
     const TOKEN_KEY = "sanmist_auth_token";
     const THEME_KEY = "mistsan_theme";
     const SEI_TARGET = 2.8;
@@ -1349,6 +1374,7 @@
     let totalFilteredRecords = 0;
     let liveSensorState = null;
     let isCycleRunning = false;
+    let currentUsername = "admin";
     let activeStation = "MIST-BOH-01";
     let currentStationSchedule = null; // Stored active schedule for selected station
     let isEditingSchedule = false;
@@ -1472,7 +1498,7 @@
       { kind: "verify", eyebrow: "Audit ledger", title: "Compliance you can prove.", text: "Export a PDF certificate or CSV straight from the tamper-evident ledger." }
     ];
     const REG_SLIDES = [
-      { kind: "telemetry", photo: "img/dashboard.jpg", eyebrow: "Fleet provisioning", title: "Link your first station.", text: "Enter the serial number and secret key from your ESP32 unit, then name the room it sanitizes." }
+      { kind: "telemetry", photo: "img/dashboard.jpg", eyebrow: "Fleet provisioning", title: "Manage your station fleet.", text: "Enter the serial number and secret key from your ESP32 unit to pair a station, or unpair existing units below." }
     ];
 
     let _artUid = 0;
@@ -1611,9 +1637,22 @@
     }
 
     /* ================= GOOGLE AUTH ================= */
-    const GOOGLE_CLIENT_ID = "844737309393-o2isok4bufbj8gdih1118klaph3ksnsd.apps.googleusercontent.com";
+    let GOOGLE_CLIENT_ID = "844737309393-o2isok4bufbj8gdih1118klaph3ksnsd.apps.googleusercontent.com";
     let googleReady = false;
     let googleTries = 0;
+    let googleConfigLoaded = false;
+
+    async function loadPublicConfig() {
+      if (googleConfigLoaded) return;
+      googleConfigLoaded = true;
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/config`);
+        if (res.ok) {
+          const cfg = await res.json();
+          if (cfg?.google_client_id) GOOGLE_CLIENT_ID = String(cfg.google_client_id).trim();
+        }
+      } catch (_) {}
+    }
 
     function renderGoogleButton() {
       const box = $("google-signin-btn-box");
@@ -1632,7 +1671,8 @@
       });
     }
 
-    function initGoogleAuth() {
+    async function initGoogleAuth() {
+      await loadPublicConfig();
       if (typeof google === "undefined" || !google.accounts?.id) {
         if (++googleTries > 40) {
           $("google-signin-btn-box")?.classList.add("is-disabled");
@@ -1710,6 +1750,7 @@
         $(`view-${v}`)?.classList.toggle("hidden", v !== viewName);
         $(`tab-${v}`)?.setAttribute("aria-pressed", v === viewName ? "true" : "false");
       });
+      window.scrollTo(0, 0);
       if (viewName === "ledger") refreshDashboard();
       if (viewName === "schedules") loadActiveStationSchedule();
     }
@@ -1746,9 +1787,13 @@
       }
       if (!dur || !vol || !preview) return;
       const sei = estimateSei(dur, vol, liveSensorState);
-      const pass = sei >= SEI_TARGET;
-      preview.textContent = pass ? `Est. SEI: ${sei.toFixed(3)} Pass (≥ 2.800)` : `Est. SEI: ${sei.toFixed(3)} Marginal (< 2.800)`;
-      setTone(preview, pass ? "pass" : "warn");
+      const tier = sei >= SEI_TARGET
+        ? { label: "Pass (≥ 2.800)", tone: "pass" }
+        : sei >= 1.8
+          ? { label: "Marginal (1.800–2.799)", tone: "warn" }
+          : { label: "Fail (< 1.800)", tone: "fail" };
+      preview.textContent = `Est. SEI: ${sei.toFixed(3)} ${tier.label}`;
+      setTone(preview, tier.tone);
       if ($("confirm-estimate-val")) $("confirm-estimate-val").textContent = `${sei.toFixed(3)} SEI`;
       if (startBtn) startBtn.disabled = Boolean(liveSensorState?.hoclLow);
     }
@@ -1793,7 +1838,12 @@
     async function loadFleetDevices() {
       let devices;
       try {
-        const res = await authFetch("/api/v1/user/admin/devices");
+        const meRes = await authFetch("/api/v1/auth/me");
+        if (meRes.ok) {
+          const me = await meRes.json();
+          if (me?.username) currentUsername = me.username;
+        }
+        const res = await authFetch(`/api/v1/user/${encodeURIComponent(currentUsername)}/devices`);
         if (res.status === 404) devices = [];
         else if (!res.ok) return;
         else devices = await res.json();
@@ -1827,14 +1877,35 @@
                   <p style="font-size:13px;font-weight:600;">${escapeHtml(d.nickname)}</p>
                   <p class="mono muted" style="font-size:10px;margin-top:2px;">${escapeHtml(d.serial_number)}</p>
                 </div>
-                <span class="chip tone-pass"><span class="dot"></span>Linked</span>
+                <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+                  <span class="chip tone-pass"><span class="dot"></span>Linked</span>
+                  <button type="button" class="btn-ghost" style="padding:6px 12px;font-size:11px;color:var(--fail);" data-unpair-serial="${escapeHtml(d.serial_number)}">Unpair</button>
+                </div>
               </div>`).join("");
+        listContainer.querySelectorAll("[data-unpair-serial]").forEach((btn) => {
+          btn.addEventListener("click", () => unpairDevice(btn.dataset.unpairSerial));
+        });
       }
       setNoDeviceState(isEmpty);
       if (isEmpty && !emptyRedirectDone) {
         emptyRedirectDone = true;
         switchView("settings");
       }
+    }
+
+    async function unpairDevice(serial) {
+      if (!serial) return;
+      if (!confirm(`Unpair station ${serial} and remove its active schedule?`)) return;
+      try {
+        const res = await authFetch(`/api/v1/devices/${encodeURIComponent(serial)}`, { method: "DELETE" });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || "Failed to unpair station");
+        }
+        toast(`Station ${serial} unpaired.`);
+        await loadFleetDevices();
+        refreshDashboard();
+      } catch (err) { alert(`Error: ${err.message}`); }
     }
 
     function onStationChanged(serial) {
@@ -1859,7 +1930,7 @@
         const res = await authFetch("/api/v1/devices/claim", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username: "admin", serial_number: serial, auth_key: key, nickname })
+          body: JSON.stringify({ username: currentUsername, serial_number: serial, auth_key: key, nickname })
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
@@ -1885,7 +1956,7 @@
     }
 
     function setActiveDays(list) {
-      const set = new Set(list);
+      const set = new Set(list.map((d) => String(d).trim().toUpperCase()).filter(Boolean));
       if ($("sched-days")) $("sched-days").value = DAYS.filter((d) => set.has(d)).join(",");
       renderDayChips();
       updateScheduleSummary();
@@ -1906,9 +1977,10 @@
       const dur = parseInt($("sched-dur")?.value, 10);
       const vol = parseFloat($("sched-vol")?.value);
       let dayText = "No days selected";
+      const joined = days.join(",");
       if (days.length === 7) dayText = "Every day";
-      else if (days.join() === "MON, TUE, WED, THU, FRI") dayText = "Weekdays";
-      else if (days.join() === "SAT, SUN") dayText = "Weekends";
+      else if (joined === "MON,TUE,WED,THU,FRI") dayText = "Weekdays";
+      else if (joined === "SAT,SUN") dayText = "Weekends";
       else if (days.length) dayText = days.join(", ");
 
       if ($("sched-summary-text")) {
@@ -1918,9 +1990,10 @@
       const chip = $("sched-sei-chip");
       if (!chip) return;
       if (sei === null) { chip.textContent = "Est. SEI --"; setTone(chip, "muted"); return; }
-      const pass = sei >= SEI_TARGET;
-      chip.textContent = `Est. SEI ${sei.toFixed(3)} ${pass ? "Pass" : "Marginal"}`;
-      setTone(chip, pass ? "pass" : "warn");
+      const label = sei >= SEI_TARGET ? "Pass" : sei >= 1.8 ? "Marginal" : "Fail";
+      const tone = sei >= SEI_TARGET ? "pass" : sei >= 1.8 ? "warn" : "fail";
+      chip.textContent = `Est. SEI ${sei.toFixed(3)} ${label}`;
+      setTone(chip, tone);
     }
 
     async function loadActiveStationSchedule() {
@@ -2153,6 +2226,29 @@
       } catch (err) { alert(`CSV Export Failed: ${err.message}`); }
     }
 
+    let cachedPdfLogo = null;
+    async function loadPdfLogoDataUrl() {
+      if (cachedPdfLogo !== null) return cachedPdfLogo;
+      try {
+        const img = await new Promise((resolve, reject) => {
+          const el = new Image();
+          el.onload = () => resolve(el);
+          el.onerror = reject;
+          el.src = "img/logo.png";
+        });
+        const size = 256;
+        const canvas = document.createElement("canvas");
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, size, size);
+        cachedPdfLogo = canvas.toDataURL("image/png");
+      } catch (_) {
+        cachedPdfLogo = "";
+      }
+      return cachedPdfLogo;
+    }
+
     async function generateAuditPdf() {
       const lib = window.jspdf;
       if (!lib || !lib.jsPDF) { alert("PDF library is still loading. Please try again in a few seconds."); return; }
@@ -2176,7 +2272,12 @@
         const generated = now.toLocaleString("en-US", { timeZone: "Asia/Manila", month: "short", day: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }) + " PHT";
         const refId = `MS-${scope === "ALL" ? "FLEET" : activeStation}-${now.toISOString().slice(0, 10).replace(/-/g, "")}`;
 
+        const logoDataUrl = await loadPdfLogoDataUrl();
         const brandMark = (x, y, s) => {
+          if (logoDataUrl) {
+            doc.addImage(logoDataUrl, "PNG", x, y, s, s);
+            return;
+          }
           doc.setFillColor(...BLUE); doc.roundedRect(x, y, s, s, s * 0.28, s * 0.28, "F");
           doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(s * 1.3);
           doc.text("S", x + s / 2, y + s / 2 + s * 0.17, { align: "center" });
@@ -2458,9 +2559,11 @@
         if (activeStatusFilter !== "all") params.set("status", activeStatusFilter);
         if (searchVal) params.set("search", searchVal);
 
+        const stationQuery = activeStation ? `?station_id=${encodeURIComponent(activeStation)}` : "";
+        const latestQuery = activeStation ? `/api/v1/records?limit=1&station_id=${encodeURIComponent(activeStation)}` : "/api/v1/records?limit=1";
         const [statsRes, latestRes, filteredRes] = await Promise.all([
-          authFetch("/api/v1/stats"),
-          authFetch("/api/v1/records?limit=1"),
+          authFetch(`/api/v1/stats${stationQuery}`),
+          authFetch(latestQuery),
           authFetch(`/api/v1/records?${params.toString()}`)
         ]);
 
@@ -2483,10 +2586,35 @@
         if ($("count-fail")) $("count-fail").textContent = stats.fail_count || 0;
         if ($("count-estop")) $("count-estop").textContent = stats.estop_count || 0;
 
+        // Live Hardware Link Status (MQTT Broker, SHA-256 Ledger Chain, Fleet Health)
+        const mqttOk = Boolean(stats.mqtt_connected);
+        if ($("broker-status")) $("broker-status").textContent = mqttOk ? "Connected (broker.emqx.io)" : "Disconnected";
+        setTone($("row-broker"), mqttOk ? "pass" : "fail");
+
+        const ledgerOk = Boolean(stats.ledger_verified);
+        const shortLatest = formatTruncatedHash(stats.latest_hash);
+        if ($("ledger-integrity-badge")) {
+          $("ledger-integrity-badge").textContent = ledgerOk
+            ? (shortLatest && shortLatest !== "--" ? `Verified (${shortLatest.slice(0, 8)})` : "Verified")
+            : "Tamper Alert!";
+        }
+        setTone($("row-ledger"), ledgerOk ? "pass" : "fail");
+
+        if (stats.fleet_health && $("fleet-health-summary")) {
+          const fh = stats.fleet_health;
+          const parts = [`${fh.active_count || 0} Active`];
+          if (fh.low_hocl_count) parts.push(`${fh.low_hocl_count} Low HOCl`);
+          if (fh.defect_count) parts.push(`${fh.defect_count} Defect`);
+          $("fleet-health-summary").textContent = fh.total_attached
+            ? `${parts.join(" · ")} (${fh.total_attached} linked)`
+            : "0 linked";
+          setTone($("row-fleet"), fh.defect_count ? "fail" : fh.low_hocl_count ? "warn" : (fh.total_attached ? "pass" : "muted"));
+        }
+
         if (stats.live_telemetry) {
           updateLiveSensorStrip(stats.live_telemetry);
-          setTone($("sensor-source-badge"), "pass");
-          if ($("sensor-source-badge")) $("sensor-source-badge").textContent = "LIVE";
+          setTone($("sensor-source-badge"), mqttOk ? "pass" : "warn");
+          if ($("sensor-source-badge")) $("sensor-source-badge").textContent = mqttOk ? "LIVE" : "CACHED";
         }
 
         if (latestRows.length > 0) {
@@ -2522,6 +2650,17 @@
           if ($("sei-gauge-bar")) $("sei-gauge-bar").style.width = `${pct}%`;
           setTone($("sei-gauge-bar"), c.tone);
           setTone($("sei-card"), c.tone);
+        } else {
+          if ($("stat-last-time")) $("stat-last-time").textContent = "--:--:--";
+          if ($("stat-sei")) $("stat-sei").textContent = "0.000";
+          if ($("stat-headline")) $("stat-headline").textContent = "Awaiting cycle data...";
+          const badge = $("stat-outcome-badge");
+          if (badge) { badge.textContent = "STANDBY"; setTone(badge, "muted"); }
+          if ($("stat-efficacy")) { $("stat-efficacy").textContent = "--"; setTone($("tile-efficacy"), "muted"); }
+          if ($("stat-confidence")) $("stat-confidence").textContent = "--";
+          if ($("stat-safety")) { $("stat-safety").textContent = "--"; setTone($("tile-safety"), "muted"); }
+          if ($("sei-gauge-bar")) $("sei-gauge-bar").style.width = "0%";
+          setTone($("sei-card"), "sei");
         }
         renderTable(currentRecords);
       } catch (err) {}
@@ -2546,11 +2685,12 @@
         const data = await res.json();
         banner.classList.remove("hidden");
         const ok = Boolean(data.verified);
+        const badIds = Array.isArray(data.tampered_ids) ? data.tampered_ids : [];
         setTone(banner, ok ? "pass" : "fail");
         banner.textContent = ok
-          ? `✓ SHA-256 Ledger Verified: All ${data.checked_records} records unbroken.`
-          : `⚠️ Ledger Tamper Alert: Signature mismatch detected on ID #${data.corrupted_ids?.[0] || "Unknown"}`;
-        $("ledger-integrity-badge").textContent = ok ? "Verified" : "Tamper Detected";
+          ? `✓ SHA-256 Ledger Verified: All ${data.checked_records} records unbroken (${formatTruncatedHash(data.latest_hash)}).`
+          : `⚠️ Ledger Tamper Alert: Hash mismatch detected on ID(s) #${badIds.length ? badIds.join(", #") : "Unknown"}`;
+        $("ledger-integrity-badge").textContent = ok ? "Verified" : "Tamper Alert!";
         setTone($("row-ledger"), ok ? "pass" : "fail");
       } catch (err) {
         banner.classList.remove("hidden");
@@ -2586,7 +2726,8 @@
       try {
         const response = await fetch(`${API_BASE}/api/v1/control/estop`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" }
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ station_id: activeStation || "MIST-BOH-01" })
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         clearInterval(countdownTimer);
@@ -2606,7 +2747,7 @@
       const phaseLabel = $("cycle-phase-label");
       const countdownEl = $("cycle-countdown");
       const progressBar = $("cycle-progress-bar");
-      const preWarningMs = 1000;
+      const preWarningMs = 10000;
       const totalMs = preWarningMs + durationSec * 1000;
       const startedAt = Date.now();
 
@@ -2616,17 +2757,18 @@
       countdownTimer = setInterval(() => {
         const elapsed = Date.now() - startedAt;
         const pct = Math.min(100, (elapsed / totalMs) * 100);
-        const remainingSec = Math.max(0, (totalMs - elapsed) / 1000);
         if (progressBar) progressBar.style.width = `${pct.toFixed(1)}%`;
 
         if (elapsed < preWarningMs) {
-          if (phaseLabel) phaseLabel.textContent = "Pre-Cycle Warning Tone Active";
-          if (countdownEl) countdownEl.textContent = `${remainingSec.toFixed(1)}s left`;
-          updateFloatingButton(true, `Warning: ${remainingSec.toFixed(0)}s`);
+          const warnRemaining = Math.max(0, (preWarningMs - elapsed) / 1000);
+          if (phaseLabel) phaseLabel.textContent = "Pre-Cycle Warning Tone Active (10s)";
+          if (countdownEl) countdownEl.textContent = `${warnRemaining.toFixed(1)}s warning`;
+          updateFloatingButton(true, `Warning: ${Math.ceil(warnRemaining)}s`);
         } else if (elapsed < totalMs) {
+          const mistRemaining = Math.max(0, (totalMs - elapsed) / 1000);
           if (phaseLabel) phaseLabel.textContent = "Atomizer Misting Active";
-          if (countdownEl) countdownEl.textContent = `${remainingSec.toFixed(1)}s left`;
-          updateFloatingButton(true, `Misting: ${remainingSec.toFixed(0)}s left`);
+          if (countdownEl) countdownEl.textContent = `${mistRemaining.toFixed(1)}s left`;
+          updateFloatingButton(true, `Misting: ${Math.ceil(mistRemaining)}s`);
         } else {
           if (phaseLabel) phaseLabel.textContent = "Misting Complete - Processing Ledger";
           if (countdownEl) countdownEl.textContent = "100%";
@@ -2661,7 +2803,7 @@
           throw new Error(err.detail || "Trigger rejected by station controller");
         }
         $("confirm-modal")?.classList.add("hidden");
-        $("cycle-modal-overlay")?.classList.add("hidden");
+        $("cycle-modal-overlay")?.classList.remove("hidden");
         startCycleCountdown(dur);
         toast(`${triggerMode === "FORCE_START" ? "Force Started" : "Cycle Executed"}: ${activeStation}`);
       } catch (err) { alert(err.message); }
@@ -2732,8 +2874,18 @@
       }
     });
 
-    $("logout-btn")?.addEventListener("click", () => {
+    $("logout-btn")?.addEventListener("click", async () => {
+      const token = localStorage.getItem(TOKEN_KEY);
+      if (token) {
+        try {
+          await fetch(`${API_BASE}/api/v1/auth/logout`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` }
+          });
+        } catch (_) {}
+      }
       localStorage.removeItem(TOKEN_KEY);
+      currentUsername = "admin";
       showLanding();
     });
 

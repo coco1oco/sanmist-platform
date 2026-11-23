@@ -36,7 +36,7 @@ MODEL_JSON_PATH = os.path.abspath(
 MODEL_PKL_PATH = os.path.abspath(
     os.path.join(BASE_DIR, "..", "..", "ml-pipeline", "models", "xgboost_sei_classifier.pkl")
 )
-DB_PATH = os.path.join(BASE_DIR, "sanmist_audit.db")
+DB_PATH = os.getenv("SANMIST_DB_PATH", os.path.join(BASE_DIR, "sanmist_audit.db"))
 
 MQTT_BROKER_HOST = os.getenv("SANMIST_MQTT_BROKER", "broker.emqx.io")
 MQTT_BROKER_PORT = int(os.getenv("SANMIST_MQTT_PORT", "1883"))
@@ -183,6 +183,59 @@ def _compute_row_hash(row: sqlite3.Row, prev_hash: str) -> str:
         trigger_type=trigger_type,
     )
 
+def _compute_record_hash_v1(
+    prev_hash: str,
+    timestamp: str,
+    station_id: str,
+    ambient_temp_c: float,
+    relative_humidity_pct: float,
+    flow_rate_ml_min: float,
+    cycle_duration_sec: float,
+    room_volume_m3: float,
+    sei_score: float,
+    predicted_class: int,
+    efficacy_label: str,
+    compliance_status: str,
+    delivery_confirmed: bool | int,
+    estop_triggered: bool | int,
+) -> str:
+    payload = [
+        str(prev_hash),
+        str(timestamp),
+        str(station_id),
+        f"{float(ambient_temp_c) + 0.0:.4f}",
+        f"{float(relative_humidity_pct) + 0.0:.4f}",
+        f"{float(flow_rate_ml_min) + 0.0:.4f}",
+        f"{float(cycle_duration_sec) + 0.0:.4f}",
+        f"{float(room_volume_m3) + 0.0:.4f}",
+        f"{float(sei_score) + 0.0:.4f}",
+        str(int(predicted_class)),
+        str(efficacy_label),
+        str(compliance_status),
+        "1" if bool(delivery_confirmed) else "0",
+        "1" if bool(estop_triggered) else "0",
+    ]
+    canonical_str = json.dumps(payload, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(canonical_str.encode("utf-8")).hexdigest()
+
+def _compute_row_hash_v1(row: sqlite3.Row, prev_hash: str) -> str:
+    return _compute_record_hash_v1(
+        prev_hash=prev_hash,
+        timestamp=row["timestamp"],
+        station_id=row["station_id"],
+        ambient_temp_c=row["ambient_temp_c"],
+        relative_humidity_pct=row["relative_humidity_pct"],
+        flow_rate_ml_min=row["flow_rate_ml_min"],
+        cycle_duration_sec=row["cycle_duration_sec"],
+        room_volume_m3=row["room_volume_m3"],
+        sei_score=row["sei_score"],
+        predicted_class=row["predicted_class"],
+        efficacy_label=row["efficacy_label"],
+        compliance_status=row["compliance_status"],
+        delivery_confirmed=row["delivery_confirmed"],
+        estop_triggered=row["estop_triggered"],
+    )
+
 def _verify_ledger_chain(cursor: sqlite3.Cursor) -> dict:
     cursor.execute("SELECT * FROM cycle_records ORDER BY id ASC")
     rows = cursor.fetchall()
@@ -195,7 +248,13 @@ def _verify_ledger_chain(cursor: sqlite3.Cursor) -> dict:
         expected_hash = _compute_row_hash(row, expected_prev_hash)
         row_prev = row["prev_hash"]
         row_hash = row["record_hash"]
-        if row_prev != expected_prev_hash or row_hash != expected_hash:
+        hash_matches = row_hash == expected_hash
+        if not hash_matches and row_prev == expected_prev_hash:
+            row_keys = row.keys()
+            trig = row["trigger_type"] if "trigger_type" in row_keys and row["trigger_type"] else "MANUAL_WEB"
+            if trig == "MANUAL_WEB":
+                hash_matches = row_hash == _compute_row_hash_v1(row, expected_prev_hash)
+        if row_prev != expected_prev_hash or not hash_matches:
             tampered_ids.append(int(row["id"]))
         expected_prev_hash = row_hash if row_hash else ""
 
@@ -207,6 +266,9 @@ def _verify_ledger_chain(cursor: sqlite3.Cursor) -> dict:
     }
 
 def init_db() -> None:
+    db_dir = os.path.dirname(DB_PATH)
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
     conn = get_db_connection()
     cursor = conn.cursor()
 
@@ -232,6 +294,65 @@ def init_db() -> None:
             record_hash TEXT
         )
     """)
+
+    cursor.execute("PRAGMA table_info(cycle_records)")
+    existing_columns = {col[1] for col in cursor.fetchall()}
+
+    if "trigger_type" not in existing_columns:
+        cursor.execute(
+            "ALTER TABLE cycle_records ADD COLUMN trigger_type TEXT NOT NULL DEFAULT 'MANUAL_WEB'"
+        )
+    if "compliance_status" not in existing_columns:
+        cursor.execute(
+            "ALTER TABLE cycle_records ADD COLUMN compliance_status TEXT NOT NULL DEFAULT 'REQUIRES ATTENTION'"
+        )
+    if "delivery_confirmed" not in existing_columns:
+        cursor.execute(
+            "ALTER TABLE cycle_records ADD COLUMN delivery_confirmed INTEGER NOT NULL DEFAULT 1"
+        )
+    if "ml_confidence" not in existing_columns:
+        cursor.execute("ALTER TABLE cycle_records ADD COLUMN ml_confidence REAL")
+    if "prev_hash" not in existing_columns:
+        cursor.execute("ALTER TABLE cycle_records ADD COLUMN prev_hash TEXT")
+    if "record_hash" not in existing_columns:
+        cursor.execute("ALTER TABLE cycle_records ADD COLUMN record_hash TEXT")
+
+    # Normalize contradictory compliance_status only on unhashed legacy rows
+    cursor.execute("""
+        UPDATE cycle_records
+        SET compliance_status = 'SAFETY INTERLOCK TRIPPED'
+        WHERE estop_triggered = 1 AND compliance_status = 'AUDIT VERIFIED'
+          AND (record_hash IS NULL OR record_hash = '')
+    """)
+    cursor.execute("""
+        UPDATE cycle_records
+        SET compliance_status = 'REQUIRES ATTENTION'
+        WHERE estop_triggered = 0 AND efficacy_label != 'Pass' AND compliance_status = 'AUDIT VERIFIED'
+          AND (record_hash IS NULL OR record_hash = '')
+    """)
+
+    # Backfill SHA-256 hash chain for unhashed legacy rows while preserving existing hashes
+    cursor.execute(
+        "SELECT 1 FROM cycle_records WHERE record_hash IS NULL OR record_hash = '' LIMIT 1"
+    )
+    if cursor.fetchone() is not None:
+        cursor.execute("SELECT * FROM cycle_records ORDER BY id ASC")
+        rows = cursor.fetchall()
+        expected_prev_hash = GENESIS_HASH
+        backfilled = 0
+        for row in rows:
+            existing_hash = row["record_hash"]
+            if existing_hash is None or existing_hash == "":
+                computed_hash = _compute_row_hash(row, expected_prev_hash)
+                cursor.execute(
+                    "UPDATE cycle_records SET prev_hash = ?, record_hash = ? WHERE id = ?",
+                    (expected_prev_hash, computed_hash, row["id"]),
+                )
+                expected_prev_hash = computed_hash
+                backfilled += 1
+            else:
+                expected_prev_hash = existing_hash
+        print(f"[DB] Backfilled SHA-256 hash chain for {backfilled} legacy cycle record(s).")
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
@@ -291,6 +412,13 @@ def init_db() -> None:
         )
     """)
 
+    cursor.execute("PRAGMA table_info(device_schedules)")
+    sched_columns = {col[1] for col in cursor.fetchall()}
+    if "room_volume_m3" not in sched_columns:
+        cursor.execute("ALTER TABLE device_schedules ADD COLUMN room_volume_m3 REAL NOT NULL DEFAULT 1.0")
+    if "dosage_ml" not in sched_columns:
+        cursor.execute("ALTER TABLE device_schedules ADD COLUMN dosage_ml REAL NOT NULL DEFAULT 10.0")
+
     # Seed Pre-Provisioned Devices Whitelist
     for s_num, d_info in ALLOWED_DEVICES_REGISTRY.items():
         cursor.execute("""
@@ -298,22 +426,33 @@ def init_db() -> None:
             VALUES (?, ?, ?, 0, datetime('now'))
         """, (s_num, d_info["model_name"], d_info["auth_key"]))
 
-    # Default Seed Admin Device
+    # Deduplicate any pre-existing user_devices rows and enforce uniqueness
     cursor.execute("""
-        INSERT OR IGNORE INTO user_devices (user_id, serial_number, nickname, room_volume_m3, paired_at)
-        VALUES ('admin', 'MIST-BOH-01', 'Kitchen Prep Area', 1.0, datetime('now'))
+        DELETE FROM user_devices
+        WHERE id NOT IN (
+            SELECT MIN(id) FROM user_devices GROUP BY user_id, serial_number
+        )
     """)
-    cursor.execute("UPDATE devices SET is_claimed = 1 WHERE serial_number = 'MIST-BOH-01'")
+    cursor.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_user_devices_user_serial
+        ON user_devices(user_id, serial_number)
+    """)
 
-    # Seed Admin User
+    # Seed Admin User (and default admin station only on first-time initialization)
     cursor.execute("SELECT COUNT(*) FROM users WHERE username = 'admin'")
     if cursor.fetchone()[0] == 0:
         now_iso = datetime.now(timezone.utc).isoformat()
-        pwd_hash, salt_hex = _hash_password("sanmist2026")
+        raw_password = os.getenv("SANMIST_ADMIN_PASSWORD", "sanmist2026")
+        pwd_hash, salt_hex = _hash_password(raw_password)
         cursor.execute("""
             INSERT INTO users (username, password_hash, salt, full_name, role, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
         """, ("admin", pwd_hash, salt_hex, "SanMist Lead Auditor", "Administrator", now_iso))
+        cursor.execute("""
+            INSERT OR IGNORE INTO user_devices (user_id, serial_number, nickname, room_volume_m3, paired_at)
+            VALUES ('admin', 'MIST-BOH-01', 'Kitchen Prep Area', 1.0, datetime('now'))
+        """)
+        cursor.execute("UPDATE devices SET is_claimed = 1 WHERE serial_number = 'MIST-BOH-01'")
 
     conn.commit()
     conn.close()
@@ -340,6 +479,9 @@ class CycleTriggerRequest(BaseModel):
     trigger_type: Optional[str] = "MANUAL_WEB"
     duration_sec: int = Field(default=30, ge=5, le=300)
     room_volume_m3: float = Field(default=1.0, gt=0, le=200.0)
+
+class EStopRequest(BaseModel):
+    station_id: Optional[str] = "MIST-BOH-01"
 
 class LoginRequest(BaseModel):
     username: str = Field(..., min_length=1, max_length=64)
@@ -449,6 +591,73 @@ def evaluate_telemetry_cycle(cycle: CycleTelemetryInput, deduplicate_window_sec:
     cursor = conn.cursor()
     try:
         cursor.execute("BEGIN IMMEDIATE")
+
+        if deduplicate_window_sec > 0.0:
+            if estop_int == 1:
+                cursor.execute(
+                    """
+                    SELECT id, timestamp, prev_hash, record_hash FROM cycle_records
+                    WHERE station_id = ?
+                      AND estop_triggered = 1
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (cycle.station_id,),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT id, timestamp, prev_hash, record_hash FROM cycle_records
+                    WHERE station_id = ?
+                      AND flow_rate_ml_min = ?
+                      AND cycle_duration_sec = ?
+                      AND estop_triggered = ?
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (
+                        cycle.station_id,
+                        cycle.flow_rate_ml_min,
+                        cycle.cycle_duration_sec,
+                        estop_int,
+                    ),
+                )
+            recent = cursor.fetchone()
+            if recent is not None:
+                try:
+                    last_ts = recent["timestamp"]
+                    if isinstance(last_ts, str):
+                        if not last_ts.endswith("Z") and "+" not in last_ts:
+                            last_ts += "Z"
+                        last_dt = datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
+                    else:
+                        last_dt = last_ts
+                    if last_dt.tzinfo is None:
+                        last_dt = last_dt.replace(tzinfo=timezone.utc)
+                    if (now_dt - last_dt).total_seconds() <= deduplicate_window_sec:
+                        cursor.execute("ROLLBACK")
+                        print(
+                            f"[MQTT DEDUP] Ignored duplicate MQTT telemetry already recorded as cycle #{recent['id']}"
+                        )
+                        return {
+                            "duplicate": True,
+                            "id": recent["id"],
+                            "timestamp": recent["timestamp"],
+                            "station_id": cycle.station_id,
+                            "trigger_type": trigger_type,
+                            "sei_score": sei_score,
+                            "predicted_class": predicted_class,
+                            "efficacy_label": efficacy_label,
+                            "compliance_status": compliance_status,
+                            "delivery_confirmed": cycle.delivery_confirmed,
+                            "ml_confidence": ml_confidence,
+                            "estop_triggered": cycle.estop_triggered,
+                            "prev_hash": recent["prev_hash"],
+                            "record_hash": recent["record_hash"],
+                        }
+                except ValueError:
+                    pass
+
         cursor.execute("SELECT record_hash FROM cycle_records ORDER BY id DESC LIMIT 1")
         prev_row = cursor.fetchone()
         prev_hash = prev_row["record_hash"] if prev_row and prev_row["record_hash"] else GENESIS_HASH
@@ -487,21 +696,92 @@ def evaluate_telemetry_cycle(cycle: CycleTelemetryInput, deduplicate_window_sec:
         inserted_id = cursor.lastrowid
         cursor.execute("COMMIT")
     except Exception:
-        cursor.execute("ROLLBACK")
+        try:
+            cursor.execute("ROLLBACK")
+        except Exception:
+            pass
         raise
     finally:
         conn.close()
 
     return {
+        "duplicate": False,
         "id": inserted_id,
         "timestamp": recorded_at,
         "station_id": cycle.station_id,
         "trigger_type": trigger_type,
         "sei_score": sei_score,
+        "predicted_class": predicted_class,
         "efficacy_label": efficacy_label,
         "compliance_status": compliance_status,
+        "delivery_confirmed": cycle.delivery_confirmed,
+        "ml_confidence": ml_confidence,
+        "estop_triggered": cycle.estop_triggered,
+        "prev_hash": prev_hash,
         "record_hash": record_hash,
     }
+
+def _compute_mqtt_signature(data_dict: dict, secret: str = MQTT_DEVICE_KEY) -> str:
+    """Compute deterministic HMAC-SHA256 over canonical MQTT payload fields."""
+    station_id = str(data_dict.get("station_id") or "MIST-BOH-01")
+    if "command" in data_dict:
+        msg = (
+            f"CMD|{data_dict.get('command')}|"
+            f"{int(data_dict.get('duration_sec', 30))}|"
+            f"{float(data_dict.get('room_volume_m3', 1.0)):.2f}"
+        )
+    elif "cycle_duration_sec" in data_dict:
+        msg = (
+            f"TEL|{station_id}|"
+            f"{float(data_dict.get('ambient_temp_c', 0.0)):.2f}|"
+            f"{float(data_dict.get('relative_humidity_pct', 0.0)):.2f}|"
+            f"{float(data_dict.get('flow_rate_ml_min', 0.0)):.2f}|"
+            f"{float(data_dict.get('cycle_duration_sec', 0.0)):.2f}|"
+            f"{float(data_dict.get('room_volume_m3', 1.0)):.2f}|"
+            f"{1 if data_dict.get('estop_triggered') else 0}"
+        )
+    else:
+        msg = (
+            f"STA|{station_id}|"
+            f"{float(data_dict.get('ambient_temp_c', 0.0)):.2f}|"
+            f"{float(data_dict.get('relative_humidity_pct', 0.0)):.2f}|"
+            f"{float(data_dict.get('flow_rate_ml_min', 0.0)):.2f}"
+        )
+    return hmac.new(secret.encode("utf-8"), msg.encode("utf-8"), hashlib.sha256).hexdigest()
+
+def _get_device_auth_key(station_id: str) -> str:
+    device_info = ALLOWED_DEVICES_REGISTRY.get(str(station_id or "").strip())
+    if device_info and device_info.get("auth_key"):
+        return str(device_info["auth_key"])
+    return MQTT_DEVICE_KEY
+
+def _verify_mqtt_auth(data_dict: dict) -> bool:
+    """Verify HMAC-SHA256 signature or shared device auth_key on inbound MQTT JSON."""
+    if not isinstance(data_dict, dict):
+        return False
+    provided_sig = str(data_dict.get("signature") or "").strip()
+    provided_key = str(data_dict.get("auth_key") or "").strip()
+    station_id = str(data_dict.get("station_id") or "").strip()
+    device_key = _get_device_auth_key(station_id)
+
+    if provided_sig:
+        expected_global = _compute_mqtt_signature(data_dict, MQTT_DEVICE_KEY)
+        if hmac.compare_digest(provided_sig.lower(), expected_global.lower()):
+            return True
+        if device_key != MQTT_DEVICE_KEY:
+            expected_device = _compute_mqtt_signature(data_dict, device_key)
+            if hmac.compare_digest(provided_sig.lower(), expected_device.lower()):
+                return True
+        return False
+
+    if provided_key:
+        if hmac.compare_digest(provided_key, MQTT_DEVICE_KEY):
+            return True
+        if device_key != MQTT_DEVICE_KEY and hmac.compare_digest(provided_key, device_key):
+            return True
+        return False
+
+    return not MQTT_REQUIRE_AUTH
 
 def _on_mqtt_connect(client, userdata, flags, reason_code, properties=None):
     print(f"[MQTT] Connected to broker {MQTT_BROKER_HOST}")
@@ -513,6 +793,11 @@ def _on_mqtt_message(client, userdata, msg):
         raw_payload = msg.payload.decode("utf-8")
         topic_str = str(getattr(msg, "topic", "") or "")
         data_dict = json.loads(raw_payload)
+
+        if not _verify_mqtt_auth(data_dict):
+            print("[MQTT AUTH] Rejected unauthorized or forged MQTT payload.")
+            return
+
         station_id = str(data_dict.get("station_id") or "MIST-BOH-01")
 
         if topic_str.endswith("/status"):
@@ -627,6 +912,27 @@ def auth_google(payload: GoogleAuthPayload):
         return {"access_token": session_token, "user": user_profile}
     except Exception as e:
         raise HTTPException(status_code=401, detail=f"Google Authentication Error: {str(e)}")
+
+@app.post("/api/v1/auth/logout")
+def logout(user: dict = Depends(require_auth)) -> dict:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM auth_sessions WHERE token = ?", (user["token"],))
+    conn.commit()
+    conn.close()
+    return {"status": "logged_out"}
+
+@app.get("/api/v1/auth/me")
+def get_current_user(user: dict = Depends(require_auth)) -> dict:
+    return {
+        "username": user["username"],
+        "full_name": user["full_name"],
+        "role": user["role"],
+    }
+
+@app.post("/api/v1/telemetry/evaluate")
+def evaluate_and_log_cycle(cycle: CycleTelemetryInput) -> dict:
+    return evaluate_telemetry_cycle(cycle)
 
 # =========================================================
 # ROUTES: FLEET & MULTI-DEVICE MANAGEMENT
@@ -755,17 +1061,22 @@ def save_schedule(payload: SchedulePayload, user: dict = Depends(require_auth)):
 # ROUTES: AUDIT LEDGER & MULTI-DEVICE OVERVIEW STATS
 # =========================================================
 @app.get("/api/v1/records")
-def get_audit_records(response: Response, limit: int = 50, offset: int = 0, status: Optional[str] = None, search: Optional[str] = None, user: dict = Depends(require_auth)) -> list[dict]:
+def get_audit_records(response: Response, limit: int = 50, offset: int = 0, status_filter: Optional[str] = None, status: Optional[str] = None, search: Optional[str] = None, station_id: Optional[str] = None, user: dict = Depends(require_auth)) -> list[dict]:
     safe_limit = max(1, min(limit, 5000))
     safe_offset = max(0, offset)
-    selected_status = (status or "").strip().lower()
+    selected_status = (status or status_filter or "").strip().lower()
     search_term = (search or "").strip()
+    station_term = (station_id or "").strip()
 
     where_clauses = []
     params = []
 
+    if station_term:
+        where_clauses.append("station_id = ?")
+        params.append(station_term)
+
     if selected_status and selected_status != "all":
-        if selected_status in {"e-stop", "estop"}:
+        if selected_status in {"e-stop", "estop", "halted"}:
             where_clauses.append("(estop_triggered = 1 OR compliance_status = 'SAFETY INTERLOCK TRIPPED')")
         elif selected_status in {"pass", "marginal", "fail"}:
             where_clauses.append("(estop_triggered = 0 AND LOWER(efficacy_label) = ?)")
@@ -778,38 +1089,46 @@ def get_audit_records(response: Response, limit: int = 50, offset: int = 0, stat
 
     where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
     conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(f"SELECT COUNT(*) FROM cycle_records {where_sql}", tuple(params))
-    filtered_count = int(cursor.fetchone()[0])
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM cycle_records")
+        total_count = int(cursor.fetchone()[0])
 
-    cursor.execute(f"SELECT * FROM cycle_records {where_sql} ORDER BY id DESC LIMIT ? OFFSET ?", (*params, safe_limit, safe_offset))
-    rows = cursor.fetchall()
-    conn.close()
+        cursor.execute(f"SELECT COUNT(*) FROM cycle_records {where_sql}", tuple(params))
+        filtered_count = int(cursor.fetchone()[0])
 
+        cursor.execute(f"SELECT * FROM cycle_records {where_sql} ORDER BY id DESC LIMIT ? OFFSET ?", (*params, safe_limit, safe_offset))
+        rows = cursor.fetchall()
+    finally:
+        conn.close()
+
+    response.headers["X-Total-Count"] = str(total_count)
     response.headers["X-Filtered-Count"] = str(filtered_count)
     return [dict(r) for r in rows]
 
 @app.get("/api/v1/stats")
-def get_audit_stats(user: dict = Depends(require_auth)) -> dict:
+def get_audit_stats(station_id: Optional[str] = None, user: dict = Depends(require_auth)) -> dict:
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
 
-    cursor.execute("""
-        SELECT
-            COUNT(*) AS total_cycles,
-            COALESCE(SUM(CASE WHEN estop_triggered = 0 AND efficacy_label = 'Pass' THEN 1 ELSE 0 END), 0) AS pass_count,
-            COALESCE(SUM(CASE WHEN estop_triggered = 0 AND efficacy_label = 'Marginal' THEN 1 ELSE 0 END), 0) AS marginal_count,
-            COALESCE(SUM(CASE WHEN estop_triggered = 0 AND efficacy_label = 'Fail' THEN 1 ELSE 0 END), 0) AS fail_count,
-            COALESCE(SUM(CASE WHEN estop_triggered = 1 THEN 1 ELSE 0 END), 0) AS estop_count
-        FROM cycle_records
-    """)
-    row = cursor.fetchone()
-    ledger_status = _verify_ledger_chain(cursor)
+        cursor.execute("""
+            SELECT
+                COUNT(*) AS total_cycles,
+                COALESCE(SUM(CASE WHEN estop_triggered = 0 AND efficacy_label = 'Pass' THEN 1 ELSE 0 END), 0) AS pass_count,
+                COALESCE(SUM(CASE WHEN estop_triggered = 0 AND efficacy_label = 'Marginal' THEN 1 ELSE 0 END), 0) AS marginal_count,
+                COALESCE(SUM(CASE WHEN estop_triggered = 0 AND efficacy_label = 'Fail' THEN 1 ELSE 0 END), 0) AS fail_count,
+                COALESCE(SUM(CASE WHEN estop_triggered = 1 THEN 1 ELSE 0 END), 0) AS estop_count
+            FROM cycle_records
+        """)
+        row = cursor.fetchone()
+        ledger_status = _verify_ledger_chain(cursor)
 
-    # Fetch user's claimed devices to calculate multi-station health breakdown
-    cursor.execute("SELECT serial_number, nickname FROM user_devices WHERE user_id = ?", (user["username"],))
-    claimed = cursor.fetchall()
-    conn.close()
+        # Fetch user's claimed devices to calculate multi-station health breakdown
+        cursor.execute("SELECT serial_number, nickname FROM user_devices WHERE user_id = ?", (user["username"],))
+        claimed = cursor.fetchall()
+    finally:
+        conn.close()
 
     fleet_summary = []
     active_count = 0
@@ -849,6 +1168,7 @@ def get_audit_stats(user: dict = Depends(require_auth)) -> dict:
     total_cycles = int(row["total_cycles"])
     pass_count = int(row["pass_count"])
     pass_rate_pct = round((pass_count / total_cycles) * 100.0, 1) if total_cycles > 0 else 0.0
+    target_station = (station_id or "").strip() or "MIST-BOH-01"
 
     return {
         "total_cycles": total_cycles,
@@ -858,6 +1178,8 @@ def get_audit_stats(user: dict = Depends(require_auth)) -> dict:
         "estop_count": int(row["estop_count"]),
         "pass_rate_pct": pass_rate_pct,
         "ledger_verified": ledger_status["verified"],
+        "latest_hash": ledger_status["latest_hash"],
+        "mqtt_connected": mqtt_client.is_connected(),
         "fleet_health": {
             "total_attached": len(claimed),
             "active_count": active_count,
@@ -865,7 +1187,8 @@ def get_audit_stats(user: dict = Depends(require_auth)) -> dict:
             "defect_count": defect_count,
             "devices": fleet_summary
         },
-        "live_telemetry": live_station_telemetry.get("MIST-BOH-01", {
+        "live_telemetry": live_station_telemetry.get(target_station, {
+            "station_id": target_station,
             "ambient_temp_c": 25.0,
             "relative_humidity_pct": 65.0,
             "flow_rate_ml_min": 30.0,
@@ -887,8 +1210,15 @@ def verify_ledger(user: dict = Depends(require_auth)) -> dict:
 # =========================================================
 @app.post("/api/v1/trigger")
 def trigger_cycle(req: CycleTriggerRequest, user: dict = Depends(require_auth)) -> dict:
+    if not mqtt_client.is_connected():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="MQTT broker is disconnected; unable to dispatch cycle.",
+        )
+
     trigger_type = req.trigger_type or "MANUAL_WEB"
     station_id = req.station_id or "MIST-BOH-01"
+    device_key = _get_device_auth_key(station_id)
 
     cmd_dict = {
         "command": "START",
@@ -897,43 +1227,43 @@ def trigger_cycle(req: CycleTriggerRequest, user: dict = Depends(require_auth)) 
         "duration_sec": req.duration_sec,
         "room_volume_m3": req.room_volume_m3,
         "triggered_by": user["username"],
+        "auth_key": device_key,
     }
+    cmd_dict["signature"] = _compute_mqtt_signature(cmd_dict, device_key)
     payload = json.dumps(cmd_dict)
 
-    if mqtt_client.is_connected():
-        mqtt_client.publish(MQTT_CONTROL_TOPIC, payload)
-
-    # Ingest cycle evaluation to ledger
-    live_env = live_station_telemetry.get(station_id, {})
-    cycle_mock = CycleTelemetryInput(
-        station_id=station_id,
-        ambient_temp_c=live_env.get("ambient_temp_c", 25.0),
-        relative_humidity_pct=live_env.get("relative_humidity_pct", 65.0),
-        flow_rate_ml_min=live_env.get("flow_rate_ml_min", 30.0),
-        cycle_duration_sec=float(req.duration_sec),
-        room_volume_m3=float(req.room_volume_m3),
-        delivery_confirmed=True,
-        estop_triggered=False,
-        trigger_type=trigger_type,
-    )
-    result = evaluate_telemetry_cycle(cycle_mock)
+    info = mqtt_client.publish(MQTT_CONTROL_TOPIC, payload)
+    if info is None or info.rc != mqtt.MQTT_ERR_SUCCESS:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"MQTT publish failed (rc={getattr(info, 'rc', 'unknown')}).",
+        )
 
     return {
         "status": "DISPATCHED",
-        "trigger_type": trigger_type,
         "station_id": station_id,
-        "sei_score": result["sei_score"],
-        "record_hash": result["record_hash"]
+        "trigger_type": trigger_type,
+        "duration_sec": req.duration_sec,
+        "room_volume_m3": req.room_volume_m3,
+        "triggered_by": user["username"],
     }
 
 @app.post("/api/v1/control/estop")
-def emergency_stop_cycle():
-    abort_payload = {"command": "STOP", "station_id": "MIST-BOH-01", "triggered_by": "ui_operator"}
+def emergency_stop_cycle(req: Optional[EStopRequest] = None):
+    station_id = (req.station_id if req and req.station_id else "MIST-BOH-01").strip() or "MIST-BOH-01"
+    device_key = _get_device_auth_key(station_id)
+    abort_payload = {
+        "command": "STOP",
+        "station_id": station_id,
+        "triggered_by": "ui_operator",
+        "auth_key": device_key,
+    }
+    abort_payload["signature"] = _compute_mqtt_signature(abort_payload, device_key)
     if mqtt_client.is_connected():
         mqtt_client.publish(MQTT_CONTROL_TOPIC, json.dumps(abort_payload))
 
     cycle_abort = CycleTelemetryInput(
-        station_id="MIST-BOH-01",
+        station_id=station_id,
         ambient_temp_c=0.0,
         relative_humidity_pct=0.0,
         flow_rate_ml_min=0.0,
@@ -944,10 +1274,42 @@ def emergency_stop_cycle():
         trigger_type="EMERGENCY_STOP",
     )
     evaluate_telemetry_cycle(cycle_abort)
-    return {"status": "HALTED", "message": "Emergency Stop dispatched"}
+    return {"status": "HALTED", "station_id": station_id, "message": "Emergency Stop dispatched"}
+
+@app.get("/health")
+def health_check() -> dict:
+    return {
+        "status": "online",
+        "service": "MistSan Compliance API",
+        "model_loaded": model is not None,
+        "mqtt_connected": mqtt_client.is_connected(),
+    }
+
+@app.get("/api/v1/config")
+def get_public_config() -> dict:
+    return {
+        "google_client_id": os.getenv("SANMIST_GOOGLE_CLIENT_ID", "").strip(),
+    }
 
 if os.path.exists(FRONTEND_DIR):
     app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+    FRONTEND_IMG_DIR = os.path.join(FRONTEND_DIR, "img")
+    if os.path.exists(FRONTEND_IMG_DIR):
+        app.mount("/img", StaticFiles(directory=FRONTEND_IMG_DIR), name="img")
+
+    @app.get("/favicon.ico")
+    def serve_favicon():
+        logo_path = os.path.join(FRONTEND_DIR, "img", "logo.png")
+        if os.path.exists(logo_path):
+            return FileResponse(logo_path, media_type="image/png")
+        raise HTTPException(status_code=404, detail="Favicon not found")
+
+    @app.get("/privacy")
+    def serve_privacy():
+        privacy_path = os.path.join(FRONTEND_DIR, "privacy.html")
+        if os.path.exists(privacy_path):
+            return FileResponse(privacy_path)
+        raise HTTPException(status_code=404, detail="Privacy policy not found")
 
     @app.get("/")
     def serve_frontend():

@@ -35,6 +35,7 @@ const char* mqtt_server_fallback_ip = "44.232.241.40";
 const int mqtt_port = 1883;
 const char* mqtt_username = "";
 const char* mqtt_password = "";
+const char* device_station_id = "MIST-BOH-01";
 const char* device_auth_key = "sanmist-edge-key-2026";
 const unsigned int BUZZER_FREQ_HZ = 2000;
 const char* telemetry_topic = "sanmist/devices/MIST-BOH-01/telemetry";
@@ -44,6 +45,7 @@ const char* control_topic = "sanmist/control/trigger";
 // Forward declarations for compiler scope resolution
 void runSanitizationCycle(unsigned long durationMs, float roomVol);
 void publishTelemetry(float temp, float hum, float flow, float durationSec, float roomVol, bool estop);
+void reconnectMQTT(bool force = false);
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -80,6 +82,17 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
         return;
     }
 
+    const char* targetStation = doc["station_id"] | "";
+    if (strlen(targetStation) > 0 && strcmp(targetStation, device_station_id) != 0) {
+        return;
+    }
+
+    const char* providedKey = doc["auth_key"] | "";
+    if (strlen(providedKey) > 0 && strcmp(providedKey, device_auth_key) != 0) {
+        Serial.println("[MQTT AUTH] Rejected control command with invalid auth_key.");
+        return;
+    }
+
     const char* command = doc["command"] | "";
 
     // 1. Handle Remote UI Emergency Stop
@@ -91,18 +104,23 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
         return;
     }
 
-    // 2. Handle Remote Trigger START
+    // 2. Handle Remote Trigger START (defer execution to loop() to avoid re-entrant MQTT callback)
     if (strcmp(command, "START") == 0) {
-        if (cycleInProgress) {
+        if (cycleInProgress || remoteTriggerRequested) {
             Serial.println("[WARN] Trigger ignored: Cycle already in progress.");
             return;
         }
         int durationSec = doc["duration_sec"] | 30;
+        if (durationSec < 5) durationSec = 5;
+        if (durationSec > 300) durationSec = 300;
         float roomVol = doc["room_volume_m3"] | 1.0f;
-        Serial.print("[REMOTE TRIGGER] Accepted! Duration: ");
+        if (roomVol <= 0.0f) roomVol = DEFAULT_ROOM_VOLUME_M3;
+        remoteMistDurationMs = (unsigned long)durationSec * 1000UL;
+        remoteRoomVolumeM3 = roomVol;
+        remoteTriggerRequested = true;
+        Serial.print("[REMOTE TRIGGER] Queued! Duration: ");
         Serial.print(durationSec);
         Serial.println(" s");
-        runSanitizationCycle(durationSec * 1000UL, roomVol);
     }
 }
 
@@ -166,11 +184,11 @@ void pollAndPublishLiveSensors(bool forcePublish = false) {
 }
 
 // Non-blocking MQTT connection with hostname-first resolution and IPv4 fallback
-void reconnectMQTT() {
+void reconnectMQTT(bool force) {
     if (client.connected()) return;
 
     unsigned long now = millis();
-    if (now - lastMqttRetry > 2000) {
+    if (force || now - lastMqttRetry > 2000) {
         lastMqttRetry = now;
         Serial.print("[MQTT] Attempting connection to ");
         Serial.print(mqtt_server_host);
@@ -216,7 +234,7 @@ void publishTelemetry(float temp, float hum, float flow, float durationSec, floa
     // CRITICAL: Reconnect BEFORE publishing if the connection dropped during misting
     if (!client.connected()) {
         Serial.println("[MQTT] Socket disconnected during misting! Reconnecting before publish...");
-        reconnectMQTT();
+        reconnectMQTT(true);
     }
 
     JsonDocument doc;
@@ -252,12 +270,12 @@ void runSanitizationCycle(unsigned long durationMs, float roomVol) {
     float latestHum = 65.0f;
     readSanitizedEnvironment(latestTemp, latestHum);
 
-    // --- Pre-Cycle Warning Phase (1 second audible alarm) ---
+    // --- Pre-Cycle Warning Phase (10 second audible alarm) ---
     Serial.println("[START] Pre-cycle audible warning initiated...");
     tone(PIN_BUZZER, BUZZER_FREQ_HZ);
 
     unsigned long bzStart = millis();
-    while (millis() - bzStart < 1000) {
+    while (millis() - bzStart < 10000) {
         // Check physical pin or ISR flag
         if (estop_active || digitalRead(PIN_BTN_ESTOP) == LOW) {
             estop_active = true;
@@ -361,10 +379,13 @@ void loop() {
     }
 
     // Physical manual start button check uses fixed manual defaults
-    if (digitalRead(PIN_BTN_START) == LOW) {
+    if (!cycleInProgress && digitalRead(PIN_BTN_START) == LOW) {
         delay(30); // Debounce
         if (digitalRead(PIN_BTN_START) == LOW) {
             runSanitizationCycle(DEFAULT_MIST_DURATION_MS, DEFAULT_ROOM_VOLUME_M3);
+            while (digitalRead(PIN_BTN_START) == LOW) {
+                delay(10);
+            }
         }
     }
 
