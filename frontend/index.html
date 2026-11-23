@@ -896,7 +896,7 @@
           <form id="login-form" class="login-form">
             <div>
               <label class="label" for="login-username">Username</label>
-              <input id="login-username" type="text" required placeholder="admin" autocomplete="username" class="input" />
+              <input id="login-username" type="text" required placeholder="Enter username" autocomplete="username" class="input" />
             </div>
             <div>
               <label class="label" for="login-password">Password</label>
@@ -907,13 +907,6 @@
             </div>
             <button id="login-submit-btn" type="submit" class="btn btn-block btn-lg">Sign In to Dashboard</button>
           </form>
-          <div style="display:flex;flex-direction:column;gap:10px;">
-            <span class="tiny-label">Demo credentials</span>
-            <button type="button" class="demo-btn" onclick="fillDemoCredentials('admin', 'sanmist2026')">
-              <span class="who"><span class="dot" style="--tone:var(--pass)"></span>Admin Demo</span>
-              <span class="muted" style="font-size:12px;">admin / sanmist2026</span>
-            </button>
-          </div>
         </div>
       </div>
       <p class="login-foot">New here? Sign in with Google, then link your first station.</p>
@@ -2845,11 +2838,6 @@
       $("login-overlay")?.classList.add("hidden");
       $("landing")?.classList.remove("hidden");
       window.scrollTo(0, 0);
-    }
-
-    function fillDemoCredentials(u, p) {
-      $("login-username").value = u;
-      $("login-password").value = p;
     }
 
     $("login-form")?.addEventListener("submit", async (e) => {
