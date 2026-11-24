@@ -1016,6 +1016,13 @@
     </header>
 
     <main class="content">
+      <div id="connection-recovery-banner" class="alert tone-warn hidden" role="status" aria-live="polite" style="margin-bottom:20px;justify-content:space-between;align-items:center;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="dot" style="width:9px;height:9px;border-radius:50%;background:currentColor;flex-shrink:0;"></span>
+          <span id="connection-recovery-msg" style="font-size:13px;font-weight:500;">Connection to SanMist backend lost — retrying automatically...</span>
+        </div>
+        <button id="btn-retry-connection" type="button" class="btn-ghost btn-sm" onclick="refreshDashboard()">Retry Now</button>
+      </div>
       <!-- ============ VIEW 1: OVERVIEW ============ -->
       <div id="view-overview" class="stack">
         <div class="hero-banner">
@@ -1362,6 +1369,9 @@
     let activeStation = "MIST-BOH-01";
     let currentStationSchedule = null; // Stored active schedule for selected station
     let isEditingSchedule = false;
+    let apiConnected = true;
+    let consecutivePollErrors = 0;
+    let lastSyncedAt = null;
 
     const expandedRecordIds = new Set();
     const $ = (id) => document.getElementById(id);
@@ -1956,10 +1966,19 @@
     }
 
     function updateScheduleSummary() {
-      const days = getActiveDays();
-      const time = $("sched-time")?.value || "23:00";
-      const dur = parseInt($("sched-dur")?.value, 10);
-      const vol = parseFloat($("sched-vol")?.value);
+      const hasForm = Boolean($("sched-days"));
+      const days = hasForm
+        ? getActiveDays()
+        : String(currentStationSchedule?.days_of_week || "").split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
+      const time = hasForm
+        ? ($("sched-time")?.value || "23:00")
+        : String(currentStationSchedule?.start_time_pht || "23:00").slice(0, 5);
+      const dur = hasForm
+        ? parseInt($("sched-dur")?.value, 10)
+        : parseInt(currentStationSchedule?.duration_sec, 10);
+      const vol = hasForm
+        ? parseFloat($("sched-vol")?.value)
+        : parseFloat(currentStationSchedule?.room_volume_m3);
       let dayText = "No days selected";
       const joined = days.join(",");
       if (days.length === 7) dayText = "Every day";
@@ -2007,6 +2026,10 @@
         const vol = sched.room_volume_m3 || 1.0;
         const sei = estimateSei(dur, vol, liveSensorState);
 
+        const lastRunHtml = sched.last_triggered_at
+          ? `<p class="mono muted" style="font-size:11px;margin-top:6px;">Last auto-dispatched: ${escapeHtml(formatManilaDateTime(sched.last_triggered_at))} PHT</p>`
+          : `<p class="muted" style="font-size:11px;margin-top:6px;">Awaiting next scheduled PHT execution window.</p>`;
+
         slot.innerHTML = `
           <div class="row-between">
             <span class="eyebrow tone-pass tone-text">Active Station Routine</span>
@@ -2015,6 +2038,7 @@
           <div>
             <h3 style="font-size:22px;font-weight:700;">${escapeHtml(activeStation)} Disinfection</h3>
             <p class="sub" style="font-size:12px;margin-top:6px;">This station is set to sanitize automatically according to the verified parameters below.</p>
+            ${lastRunHtml}
           </div>
           <div class="tile-grid-2">
             <div class="card stat-tile">
@@ -2049,6 +2073,7 @@
             </button>
           </div>
         `;
+        updateScheduleSummary();
         return;
       }
 
@@ -2160,12 +2185,31 @@
     async function fetchExportRecords() {
       const days = parseInt($("export-days").value, 10) || 14;
       const scope = $("export-scope").value;
-      const params = new URLSearchParams({ limit: "1000", offset: "0" });
-      if (scope !== "ALL") params.set("search", activeStation);
-      const res = await authFetch(`/api/v1/records?${params.toString()}`);
-      if (!res.ok) throw new Error("Could not fetch records for export");
-      const all = await res.json();
       const cutoff = Date.now() - days * 86400000;
+      const cutoffIso = new Date(cutoff).toISOString();
+      const pageLimit = 1000;
+      const maxPages = 100;
+      const all = [];
+      let offset = 0;
+
+      for (let page = 0; page < maxPages; page++) {
+        const params = new URLSearchParams({
+          limit: String(pageLimit),
+          offset: String(offset),
+          since: cutoffIso
+        });
+        if (scope !== "ALL" && activeStation) params.set("station_id", activeStation);
+        const res = await authFetch(`/api/v1/records?${params.toString()}`);
+        if (!res.ok) throw new Error("Could not fetch records for export");
+        const batch = await res.json();
+        all.push(...batch);
+
+        const filteredHeader = parseInt(res.headers.get("X-Filtered-Count") || "", 10);
+        offset += batch.length;
+        if (batch.length < pageLimit) break;
+        if (Number.isFinite(filteredHeader) && offset >= filteredHeader) break;
+      }
+
       const records = all.filter((r) => {
         let ts = String(r.timestamp || "");
         if (!ts.endsWith("Z") && !ts.includes("+")) ts += "Z";
@@ -2534,6 +2578,41 @@
       });
     }
 
+    function markConnectionLost(reason = "") {
+      consecutivePollErrors += 1;
+      apiConnected = false;
+      const banner = $("connection-recovery-banner");
+      const msg = $("connection-recovery-msg");
+      if (banner) banner.classList.remove("hidden");
+      if (msg) {
+        const lastSyncNote = lastSyncedAt ? ` (last sync ${lastSyncedAt})` : "";
+        const detail = reason ? ` [${reason}]` : "";
+        msg.textContent = `Connection to SanMist backend lost${detail} — retrying automatically (attempt ${consecutivePollErrors})${lastSyncNote}.`;
+      }
+      if ($("broker-status")) $("broker-status").textContent = "Offline (Reconnecting...)";
+      setTone($("row-broker"), "fail");
+      if ($("sensor-source-badge")) $("sensor-source-badge").textContent = "OFFLINE";
+      setTone($("sensor-source-badge"), "fail");
+    }
+
+    function markConnectionRestored() {
+      const wasDisconnected = !apiConnected;
+      apiConnected = true;
+      consecutivePollErrors = 0;
+      lastSyncedAt = new Date().toLocaleTimeString("en-PH", {
+        timeZone: "Asia/Manila",
+        hour12: false,
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit"
+      });
+      $("connection-recovery-banner")?.classList.add("hidden");
+      if (wasDisconnected) {
+        toast("Connection restored — live telemetry resumed.");
+        loadFleetDevices();
+      }
+    }
+
     async function refreshDashboard() {
       if (!localStorage.getItem(TOKEN_KEY)) return;
       try {
@@ -2551,7 +2630,13 @@
           authFetch(`/api/v1/records?${params.toString()}`)
         ]);
 
-        if (!statsRes.ok || !latestRes.ok || !filteredRes.ok) return;
+        if (statsRes.status === 401 || latestRes.status === 401 || filteredRes.status === 401) return;
+        if (!statsRes.ok || !latestRes.ok || !filteredRes.ok) {
+          markConnectionLost(`HTTP ${statsRes.status}/${latestRes.status}/${filteredRes.status}`);
+          return;
+        }
+
+        markConnectionRestored();
 
         const stats = await statsRes.json();
         const latestRows = await latestRes.json();
@@ -2572,7 +2657,14 @@
 
         // Live Hardware Link Status (MQTT Broker, SHA-256 Ledger Chain, Fleet Health)
         const mqttOk = Boolean(stats.mqtt_connected);
-        if ($("broker-status")) $("broker-status").textContent = mqttOk ? "Connected (broker.emqx.io)" : "Disconnected";
+        const brokerHost = stats.mqtt_broker_host || "broker.emqx.io";
+        const brokerPort = stats.mqtt_broker_port ? `:${stats.mqtt_broker_port}` : "";
+        const tlsPrefix = stats.mqtt_tls_enabled ? "TLS · " : "";
+        if ($("broker-status")) {
+          $("broker-status").textContent = mqttOk
+            ? `Connected (${tlsPrefix}${brokerHost}${brokerPort})`
+            : `Disconnected (${tlsPrefix}${brokerHost}${brokerPort})`;
+        }
         setTone($("row-broker"), mqttOk ? "pass" : "fail");
 
         const ledgerOk = Boolean(stats.ledger_verified);
@@ -2647,7 +2739,10 @@
           setTone($("sei-card"), "sei");
         }
         renderTable(currentRecords);
-      } catch (err) {}
+      } catch (err) {
+        if (err && err.message === "Unauthenticated") return;
+        markConnectionLost(err?.message || "Network unreachable");
+      }
     }
 
     function filterByKpi(statusKey) {
@@ -2708,7 +2803,7 @@
       if (!isCycleRunning) return;
       if ($("estop-btn-label")) $("estop-btn-label").innerText = "ABORTING CYCLE...";
       try {
-        const response = await fetch(`${API_BASE}/api/v1/control/estop`, {
+        const response = await authFetch("/api/v1/control/estop", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ station_id: activeStation || "MIST-BOH-01" })
@@ -2811,6 +2906,9 @@
       clearInterval(pollTimer);
       pollTimer = null;
       hasDevices = null;
+      apiConnected = true;
+      consecutivePollErrors = 0;
+      $("connection-recovery-banner")?.classList.add("hidden");
       $("app-shell")?.classList.add("hidden");
     }
 
@@ -2949,6 +3047,13 @@
     window.addEventListener("scroll", () => {
       document.querySelector(".lp-nav")?.classList.toggle("scrolled", window.scrollY > 24);
     }, { passive: true });
+
+    window.addEventListener("offline", () => {
+      if (localStorage.getItem(TOKEN_KEY)) markConnectionLost("Browser offline");
+    });
+    window.addEventListener("online", () => {
+      if (localStorage.getItem(TOKEN_KEY)) refreshDashboard();
+    });
 
     if (localStorage.getItem(TOKEN_KEY)) {
       showDashboard();

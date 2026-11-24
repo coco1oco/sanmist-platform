@@ -1,7 +1,9 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
+#include <time.h>
 #include "DHT.h"
 
 // Hardware Pin Definitions (aligned with firmware/diagram.json)
@@ -29,10 +31,9 @@ bool cycleInProgress = false;
 const char* ssid = "Wokwi-GUEST";
 const char* password = "";
 
-// MQTT Broker (supports private/authenticated broker + shared device payload auth)
+// MQTT Broker (MQTTS over TLS 8883 with Root CA verification + payload auth_key)
 const char* mqtt_server_host = "broker.emqx.io";
-const char* mqtt_server_fallback_ip = "44.232.241.40";
-const int mqtt_port = 1883;
+const int mqtt_port = 8883;
 const char* mqtt_username = "";
 const char* mqtt_password = "";
 const char* device_station_id = "MIST-BOH-01";
@@ -42,12 +43,39 @@ const char* telemetry_topic = "sanmist/devices/MIST-BOH-01/telemetry";
 const char* status_topic = "sanmist/devices/MIST-BOH-01/status";
 const char* control_topic = "sanmist/control/trigger";
 
+// Verified Root CA (DigiCert Global Root G2) for broker.emqx.io:8883
+// Replace with local Mosquitto ca.crt when targeting a self-hosted Docker broker.
+static const char* mqtt_ca_cert = R"EOF(
+-----BEGIN CERTIFICATE-----
+MIIDjjCCAnagAwIBAgIQAzrx5qcRqaC7KGSxHQn65TANBgkqhkiG9w0BAQsFADBh
+MQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3
+d3cuZGlnaWNlcnQuY29tMSAwHgYDVQQDExdEaWdpQ2VydCBHbG9iYWwgUm9vdCBH
+MjAeFw0xMzA4MDExMjAwMDBaFw0zODAxMTUxMjAwMDBaMGExCzAJBgNVBAYTAlVT
+MRUwEwYDVQQKEwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5j
+b20xIDAeBgNVBAMTF0RpZ2lDZXJ0IEdsb2JhbCBSb290IEcyMIIBIjANBgkqhkiG
+9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuzfNNNx7a8myaJCtSnX/RrohCgiN9RlUyfuI
+2/Ou8jqJkTx65qsGGmvPrC3oXgkkRLpimn7Wo6h+4FR1IAWsULecYxpsMNzaHxmx
+1x7e/dfgy5SDN67sH0NO3Xss0r0upS/kqbitOtSZpLYl6ZtrAGCSYP9PIUkY92eQ
+q2EGnI/yuum06ZIya7XzV+hdG82MHauVBJVJ8zUtluNJbd134/tJS7SsVQepj5Wz
+tCO7TG1F8PapspUwtP1MVYwnSlcUfIKdzXOS0xZKBgyMUNGPHgm+F6HmIcr9g+UQ
+vIOlCsRnKPZzFBQ9RnbDhxSJITRNrw9FDKZJobq7nMWxM4MphQIDAQABo0IwQDAP
+BgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIBhjAdBgNVHQ4EFgQUTiJUIBiV
+5uNu5g/6+rkS7QYXjzkwDQYJKoZIhvcNAQELBQADggEBAGBnKJRvDkhj6zHd6mcY
+1Yl9PMWLSn/pvtsrF9+wX3N3KjITOYFnQoQj8kVnNeyIv/iPsGEMNKSuIEyExtv4
+NeF22d+mQrvHRAiGfzZ0JFrabA0UWTW98kndth/Jsw1HKj2ZL7tcu7XUIOGZX1NG
+Fdtom/DzMNU+MeKNhJ7jitralj41E6Vf8PlwUHBHQRFXGU7Aj64GxJUTFy8bJZ91
+8rGOmaFvE7FBcf6IKshPECBV1/MUReXgRPTqh5Uykw7+U0b6LJ3/iyK5S9kJRaTe
+pLiaWN0bfVKfjllDiIGknibVb63dDcY3fe0Dkhvld1927jyNxF1WW6LZZm6zNTfl
+MrY=
+-----END CERTIFICATE-----
+)EOF";
+
 // Forward declarations for compiler scope resolution
 void runSanitizationCycle(unsigned long durationMs, float roomVol);
 void publishTelemetry(float temp, float hum, float flow, float durationSec, float roomVol, bool estop);
 void reconnectMQTT(bool force = false);
 
-WiFiClient espClient;
+WiFiClientSecure espClient;
 PubSubClient client(espClient);
 
 volatile bool estop_active = false;
@@ -88,8 +116,8 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     }
 
     const char* providedKey = doc["auth_key"] | "";
-    if (strlen(providedKey) > 0 && strcmp(providedKey, device_auth_key) != 0) {
-        Serial.println("[MQTT AUTH] Rejected control command with invalid auth_key.");
+    if (strlen(providedKey) == 0 || strcmp(providedKey, device_auth_key) != 0) {
+        Serial.println("[MQTT AUTH] Rejected control command with missing or invalid auth_key.");
         return;
     }
 
@@ -140,6 +168,14 @@ void setupWiFi() {
 
     Serial.println("\n[WIFI] Connected! IP Address: ");
     Serial.println(WiFi.localIP());
+
+    // Sync SNTP clock briefly so mbedTLS certificate validity checks succeed
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+    unsigned long ntpStart = millis();
+    while (time(nullptr) < 1700000000L && (millis() - ntpStart) < 4000UL) {
+        delay(200);
+    }
+    Serial.printf("[TLS] System UTC epoch: %ld\n", (long)time(nullptr));
 }
 
 void readSanitizedEnvironment(float& outTemp, float& outHum) {
@@ -183,15 +219,17 @@ void pollAndPublishLiveSensors(bool forcePublish = false) {
     }
 }
 
-// Non-blocking MQTT connection with hostname-first resolution and IPv4 fallback
+// Non-blocking MQTTS (TLS) connection with hostname verification
 void reconnectMQTT(bool force) {
     if (client.connected()) return;
 
     unsigned long now = millis();
     if (force || now - lastMqttRetry > 2000) {
         lastMqttRetry = now;
-        Serial.print("[MQTT] Attempting connection to ");
+        Serial.print("[MQTTS] Attempting TLS connection to ");
         Serial.print(mqtt_server_host);
+        Serial.print(":");
+        Serial.print(mqtt_port);
         Serial.print("... ");
 
         // Hardware-seeded randomized client ID prevents broker session collisions
@@ -202,20 +240,8 @@ void reconnectMQTT(bool force) {
             ? client.connect(clientId.c_str(), mqtt_username, mqtt_password)
             : client.connect(clientId.c_str());
 
-        if (!connected) {
-            Serial.print("failed (rc=");
-            Serial.print(client.state());
-            Serial.print("), trying fallback IP ");
-            Serial.print(mqtt_server_fallback_ip);
-            Serial.print("... ");
-            client.setServer(mqtt_server_fallback_ip, mqtt_port);
-            connected = (strlen(mqtt_username) > 0)
-                ? client.connect(clientId.c_str(), mqtt_username, mqtt_password)
-                : client.connect(clientId.c_str());
-        }
-
         if (connected) {
-            Serial.println("connected!");
+            Serial.println("connected (TLS)!");
             client.subscribe(control_topic);
             Serial.print("[MQTT SUB] Subscribed to topic: ");
             Serial.println(control_topic);
@@ -358,11 +384,15 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(PIN_BTN_ESTOP), handleEmergencyStop, FALLING);
 
     setupWiFi();
+    espClient.setCACert(mqtt_ca_cert);
+    espClient.setTimeout(15000);          // milliseconds (Arduino-ESP32 3.x NetworkClientSecure)
+    espClient.setHandshakeTimeout(30);    // seconds (generous for Wokwi simulated TLS handshake)
     client.setServer(mqtt_server_host, mqtt_port);
     client.setCallback(onMqttMessage);
     client.setBufferSize(512);
+    client.setSocketTimeout(15);
 
-    Serial.println("--- MistSan ESP32 Firmware Ready ---");
+    Serial.println("--- MistSan ESP32 Firmware Ready (MQTTS TLS) ---");
 }
 
 void loop() {

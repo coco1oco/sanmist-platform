@@ -167,7 +167,9 @@ class SanMistPlatformTests(unittest.TestCase):
         timestamps = []
         for idx in range(25):
             payload = sample_payloads[idx % len(sample_payloads)]
-            code, _, res = call_api("POST", "/api/v1/telemetry/evaluate", body=payload)
+            code, _, res = call_api(
+                "POST", "/api/v1/telemetry/evaluate", body=payload, headers=auth_headers
+            )
             self.assertEqual(code, 200)
             timestamps.append(res["timestamp"])
             # Critical invariant: never save Pass alongside REQUIRES ATTENTION
@@ -261,6 +263,7 @@ class SanMistPlatformTests(unittest.TestCase):
             "room_volume_m3": 1.0,
             "delivery_confirmed": True,
             "estop_triggered": False,
+            "auth_key": main.MQTT_DEVICE_KEY,
         }).encode("utf-8")
         msg = types.SimpleNamespace(payload=raw)
 
@@ -300,7 +303,9 @@ class SanMistPlatformTests(unittest.TestCase):
 
         eval_results = []
         for payload in payloads:
-            code, _, res = call_api("POST", "/api/v1/telemetry/evaluate", body=payload)
+            code, _, res = call_api(
+                "POST", "/api/v1/telemetry/evaluate", body=payload, headers=auth_headers
+            )
             self.assertEqual(code, 200)
             self._assert_sha256_hex(res["prev_hash"])
             self._assert_sha256_hex(res["record_hash"])
@@ -359,7 +364,9 @@ class SanMistPlatformTests(unittest.TestCase):
         ]
         inserted_ids = []
         for payload in payloads:
-            code, _, res = call_api("POST", "/api/v1/telemetry/evaluate", body=payload)
+            code, _, res = call_api(
+                "POST", "/api/v1/telemetry/evaluate", body=payload, headers=auth_headers
+            )
             self.assertEqual(code, 200)
             inserted_ids.append(res["id"])
 
@@ -564,6 +571,438 @@ class SanMistPlatformTests(unittest.TestCase):
             main.MQTT_REQUIRE_AUTH = orig_require_auth
             main.mqtt_client.is_connected = orig_is_connected
             main.mqtt_client.publish = orig_publish
+
+
+class SanMistSecurityTests(unittest.TestCase):
+    def test_mqtt_security_config_defaults_to_tls_8883_and_required_auth(self) -> None:
+        from backend.app.security import load_mqtt_security_config
+
+        cfg = load_mqtt_security_config({})
+        self.assertEqual(cfg.host, "broker.emqx.io")
+        self.assertTrue(cfg.use_tls)
+        self.assertEqual(cfg.port, 8883)
+        self.assertFalse(cfg.tls_insecure)
+        self.assertTrue(cfg.require_payload_auth)
+
+        plain_cfg = load_mqtt_security_config({"SANMIST_MQTT_TLS": "0"})
+        self.assertFalse(plain_cfg.use_tls)
+        self.assertEqual(plain_cfg.port, 1883)
+
+    def test_configure_mqtt_client_applies_tls_credentials_and_reconnect_backoff(self) -> None:
+        import ssl
+        from backend.app.security import configure_mqtt_client_security, load_mqtt_security_config
+
+        calls: dict[str, object] = {}
+
+        class FakeMqttClient:
+            def username_pw_set(self, username, password=None):
+                calls["credentials"] = (username, password)
+
+            def tls_set_context(self, context):
+                calls["tls_context"] = context
+
+            def reconnect_delay_set(self, min_delay=1, max_delay=120):
+                calls["reconnect_delay"] = (min_delay, max_delay)
+
+        cfg = load_mqtt_security_config({
+            "SANMIST_MQTT_BROKER": "mosquitto",
+            "SANMIST_MQTT_PORT": "8883",
+            "SANMIST_MQTT_TLS": "1",
+            "SANMIST_MQTT_USERNAME": "sanmist_svc",
+            "SANMIST_MQTT_PASSWORD": "secret-password",
+        })
+        client = FakeMqttClient()
+        meta = configure_mqtt_client_security(client, cfg)
+
+        self.assertTrue(meta["tls_enabled"])
+        self.assertTrue(meta["credentials_configured"])
+        self.assertEqual(calls["credentials"], ("sanmist_svc", "secret-password"))
+        self.assertEqual(calls["reconnect_delay"], (1, 30))
+        ctx = calls["tls_context"]
+        self.assertIsInstance(ctx, ssl.SSLContext)
+        self.assertEqual(ctx.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(ctx.check_hostname)
+        self.assertEqual(ctx.minimum_version, ssl.TLSVersion.TLSv1_2)
+
+    def test_configure_mqtt_client_fails_closed_when_ca_cert_missing(self) -> None:
+        from backend.app.security import configure_mqtt_client_security, load_mqtt_security_config
+
+        class FakeMqttClient:
+            def username_pw_set(self, username, password=None):
+                pass
+
+            def tls_set_context(self, context):
+                pass
+
+            def reconnect_delay_set(self, min_delay=1, max_delay=120):
+                pass
+
+        cfg = load_mqtt_security_config({
+            "SANMIST_MQTT_TLS": "1",
+            "SANMIST_MQTT_CA_CERT": "/nonexistent/path/ca.crt",
+        })
+        with self.assertRaises(FileNotFoundError):
+            configure_mqtt_client_security(FakeMqttClient(), cfg)
+
+    def test_parse_cors_origins_defaults_away_from_wildcard(self) -> None:
+        from backend.app.security import parse_cors_origins
+
+        defaults = parse_cors_origins(None)
+        self.assertNotIn("*", defaults)
+        self.assertIn("http://localhost:3000", defaults)
+        self.assertIn("http://127.0.0.1:3000", defaults)
+
+        custom = parse_cors_origins("https://sanmist.example.com, https://admin.example.com ")
+        self.assertEqual(custom, ["https://sanmist.example.com", "https://admin.example.com"])
+
+    def test_mosquitto_and_compose_enforce_tls_and_disable_anonymous(self) -> None:
+        mosq_conf_path = os.path.join(PROJECT_ROOT, "mosquitto", "config", "mosquitto.conf")
+        compose_path = os.path.join(PROJECT_ROOT, "docker-compose.yml")
+        with open(mosq_conf_path, "r", encoding="utf-8") as f:
+            mosq_conf = f.read()
+        with open(compose_path, "r", encoding="utf-8") as f:
+            compose_yml = f.read()
+
+        self.assertIn("listener 8883", mosq_conf)
+        self.assertIn("allow_anonymous false", mosq_conf)
+        self.assertIn("password_file", mosq_conf)
+        self.assertIn("tls_version tlsv1.2", mosq_conf)
+        self.assertNotIn("allow_anonymous true", mosq_conf)
+        self.assertIn('SANMIST_MQTT_TLS: "1"', compose_yml)
+        self.assertIn('SANMIST_MQTT_PORT: "8883"', compose_yml)
+        self.assertIn("SANMIST_MQTT_CA_CERT: /mosquitto/certs/ca.crt", compose_yml)
+
+
+class SanMistRouteAuthTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.orig_db_path = main.DB_PATH
+        main.DB_PATH = os.path.join(self.tmpdir.name, "test_auth.db")
+        main.init_db()
+
+    def tearDown(self) -> None:
+        main.DB_PATH = self.orig_db_path
+        self.tmpdir.cleanup()
+
+    def _login_admin(self) -> str:
+        code, _, data = call_api(
+            "POST",
+            "/api/v1/auth/login",
+            body={"username": "admin", "password": os.getenv("SANMIST_ADMIN_PASSWORD", "sanmist2026")},
+        )
+        self.assertEqual(code, 200)
+        return data["access_token"]
+
+    def _create_operator_session(self, username: str = "op1") -> dict[str, str]:
+        pwd_hash, salt_hex = main._hash_password("operator-secret")
+        conn = sqlite3.connect(main.DB_PATH)
+        try:
+            conn.execute(
+                "INSERT INTO users (username, password_hash, salt, full_name, role, created_at) VALUES (?, ?, ?, ?, ?, datetime('now'))",
+                (username, pwd_hash, salt_hex, "Kitchen Operator", "Operator"),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        code, _, data = call_api(
+            "POST",
+            "/api/v1/auth/login",
+            body={"username": username, "password": "operator-secret"},
+        )
+        self.assertEqual(code, 200)
+        return {"Authorization": f"Bearer {data['access_token']}"}
+
+    def test_telemetry_evaluate_and_estop_require_auth(self) -> None:
+        sample = {
+            "station_id": "MIST-BOH-01",
+            "ambient_temp_c": 26.0,
+            "relative_humidity_pct": 65.0,
+            "flow_rate_ml_min": 40.0,
+            "cycle_duration_sec": 30.0,
+            "room_volume_m3": 1.0,
+        }
+        eval_code, _, _ = call_api("POST", "/api/v1/telemetry/evaluate", body=sample)
+        bad_key_code, _, _ = call_api(
+            "POST",
+            "/api/v1/telemetry/evaluate",
+            body=sample,
+            headers={"X-Device-Key": "wrong-device-key"},
+        )
+        estop_code, _, _ = call_api(
+            "POST", "/api/v1/control/estop", body={"station_id": "MIST-BOH-01"}
+        )
+
+        self.assertEqual(eval_code, 401)
+        self.assertEqual(bad_key_code, 401)
+        self.assertEqual(estop_code, 401)
+
+        # Valid X-Device-Key succeeds on telemetry/evaluate
+        ok_device_code, _, ok_device = call_api(
+            "POST",
+            "/api/v1/telemetry/evaluate",
+            body=sample,
+            headers={"X-Device-Key": main._get_device_auth_key("MIST-BOH-01")},
+        )
+        self.assertEqual(ok_device_code, 200)
+        self.assertEqual(ok_device["station_id"], "MIST-BOH-01")
+
+        # Valid Bearer token succeeds on telemetry/evaluate and control/estop
+        admin_headers = {"Authorization": f"Bearer {self._login_admin()}"}
+        ok_bearer_code, _, _ = call_api(
+            "POST", "/api/v1/telemetry/evaluate", body=sample, headers=admin_headers
+        )
+        ok_estop_code, _, ok_estop = call_api(
+            "POST",
+            "/api/v1/control/estop",
+            body={"station_id": "MIST-BOH-01"},
+            headers=admin_headers,
+        )
+        self.assertEqual(ok_bearer_code, 200)
+        self.assertEqual(ok_estop_code, 200)
+        self.assertEqual(ok_estop["status"], "HALTED")
+
+    def test_operator_cannot_access_unowned_devices_or_schedules(self) -> None:
+        op_headers = self._create_operator_session("op_isolated")
+
+        other_devs_code, _, _ = call_api(
+            "GET", "/api/v1/user/admin/devices", headers=op_headers
+        )
+        save_sched_code, _, _ = call_api(
+            "POST",
+            "/api/v1/schedules",
+            headers=op_headers,
+            body={
+                "serial_number": "MIST-BOH-01",
+                "days_of_week": "MON,TUE",
+                "start_time_pht": "22:00:00",
+                "duration_sec": 30,
+                "room_volume_m3": 1.0,
+            },
+        )
+        get_sched_code, _, _ = call_api(
+            "GET", "/api/v1/schedules/MIST-BOH-01", headers=op_headers
+        )
+        estop_code, _, _ = call_api(
+            "POST",
+            "/api/v1/control/estop",
+            headers=op_headers,
+            body={"station_id": "MIST-BOH-01"},
+        )
+
+        self.assertEqual(other_devs_code, 403)
+        self.assertEqual(save_sched_code, 403)
+        self.assertEqual(get_sched_code, 403)
+        self.assertEqual(estop_code, 403)
+
+    def test_security_headers_and_tls_metadata_exposed(self) -> None:
+        code, headers, health = call_api(
+            "GET", "/health", headers={"X-Forwarded-Proto": "https"}
+        )
+        self.assertEqual(code, 200)
+        self.assertEqual(headers.get("x-content-type-options"), "nosniff")
+        self.assertEqual(headers.get("x-frame-options"), "DENY")
+        self.assertIn("strict-transport-security", headers)
+        self.assertIn("mqtt_tls_enabled", health)
+        self.assertIn("mqtt_broker_host", health)
+        self.assertIn("mqtt_broker_port", health)
+
+        admin_headers = {"Authorization": f"Bearer {self._login_admin()}"}
+        stats_code, _, stats = call_api("GET", "/api/v1/stats", headers=admin_headers)
+        self.assertEqual(stats_code, 200)
+        self.assertIn("mqtt_tls_enabled", stats)
+        self.assertIn("mqtt_broker_host", stats)
+        self.assertIn("mqtt_broker_port", stats)
+
+
+class SanMistSchedulerAndExportTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.orig_db_path = main.DB_PATH
+        main.DB_PATH = os.path.join(self.tmpdir.name, "test_sched_export.db")
+        main.init_db()
+
+    def tearDown(self) -> None:
+        main.DB_PATH = self.orig_db_path
+        self.tmpdir.cleanup()
+
+    def _login_admin(self) -> dict[str, str]:
+        code, _, data = call_api(
+            "POST",
+            "/api/v1/auth/login",
+            body={"username": "admin", "password": os.getenv("SANMIST_ADMIN_PASSWORD", "sanmist2026")},
+        )
+        self.assertEqual(code, 200)
+        return {"Authorization": f"Bearer {data['access_token']}"}
+
+    def test_scheduler_executes_matching_pht_schedule_once_and_recovers_after_disconnect(self) -> None:
+        from datetime import datetime, timezone
+        from backend.app.scheduler import run_schedule_tick
+
+        admin_headers = self._login_admin()
+        save_code, _, _ = call_api(
+            "POST",
+            "/api/v1/schedules",
+            headers=admin_headers,
+            body={
+                "serial_number": "MIST-BOH-01",
+                "days_of_week": "MON, TUE, WED, THU, FRI",
+                "start_time_pht": "23:00:00",
+                "duration_sec": 45,
+                "room_volume_m3": 2.5,
+                "dosage_ml": 12.0,
+            },
+        )
+        self.assertEqual(save_code, 200)
+
+        dispatched: list[dict] = []
+        broker_online = False
+
+        def fake_dispatch(
+            station_id: str,
+            duration_sec: int,
+            room_volume_m3: float,
+            trigger_type: str,
+            triggered_by: str,
+        ) -> bool:
+            if not broker_online:
+                return False
+            dispatched.append({
+                "station_id": station_id,
+                "duration_sec": duration_sec,
+                "room_volume_m3": room_volume_m3,
+                "trigger_type": trigger_type,
+                "triggered_by": triggered_by,
+            })
+            return True
+
+        # Tuesday 2026-11-24 23:00 PHT == 2026-11-24 15:00 UTC
+        tue_2300_utc = datetime(2026, 11, 24, 15, 0, 5, tzinfo=timezone.utc)
+        tue_2300_later_utc = datetime(2026, 11, 24, 15, 0, 35, tzinfo=timezone.utc)
+        tue_2259_utc = datetime(2026, 11, 24, 14, 59, 0, tzinfo=timezone.utc)
+        sat_2300_utc = datetime(2026, 11, 28, 15, 0, 5, tzinfo=timezone.utc)
+
+        # 1. Wrong time or wrong day never dispatches
+        broker_online = True
+        self.assertEqual(run_schedule_tick(main.get_db_connection, fake_dispatch, now_utc=tue_2259_utc), [])
+        self.assertEqual(run_schedule_tick(main.get_db_connection, fake_dispatch, now_utc=sat_2300_utc), [])
+        self.assertEqual(len(dispatched), 0)
+
+        # 2. Matching slot while broker offline fails cleanly without burning the slot
+        broker_online = False
+        self.assertEqual(run_schedule_tick(main.get_db_connection, fake_dispatch, now_utc=tue_2300_utc), [])
+        self.assertEqual(len(dispatched), 0)
+
+        # 3. Broker recovers within same minute -> schedule dispatches once
+        broker_online = True
+        fired = run_schedule_tick(main.get_db_connection, fake_dispatch, now_utc=tue_2300_later_utc)
+        self.assertEqual(len(fired), 1)
+        self.assertEqual(len(dispatched), 1)
+        self.assertEqual(dispatched[0]["station_id"], "MIST-BOH-01")
+        self.assertEqual(dispatched[0]["duration_sec"], 45)
+        self.assertEqual(dispatched[0]["room_volume_m3"], 2.5)
+        self.assertEqual(dispatched[0]["trigger_type"], "SCHEDULED")
+
+        # 4. Subsequent tick in same slot does NOT double-trigger
+        self.assertEqual(run_schedule_tick(main.get_db_connection, fake_dispatch, now_utc=tue_2300_later_utc), [])
+        self.assertEqual(len(dispatched), 1)
+
+        # 5. GET schedule exposes last_triggered_at metadata
+        get_code, _, sched = call_api("GET", "/api/v1/schedules/MIST-BOH-01", headers=admin_headers)
+        self.assertEqual(get_code, 200)
+        self.assertIsNotNone(sched.get("last_triggered_at"))
+
+    def test_records_pagination_beyond_1000_and_since_filter(self) -> None:
+        admin_headers = self._login_admin()
+
+        conn = sqlite3.connect(main.DB_PATH)
+        try:
+            rows = []
+            # 150 older rows from 2026-09-01 + 1100 recent rows from 2026-11-20
+            for i in range(150):
+                rows.append((
+                    f"2026-09-01T00:00:{i % 60:02d}+00:00",
+                    "MIST-BOH-01",
+                    "MANUAL_WEB",
+                    25.0,
+                    65.0,
+                    35.0,
+                    30.0,
+                    1.0,
+                    17.5,
+                    2,
+                    "Pass",
+                    "AUDIT VERIFIED",
+                    1,
+                    99.0,
+                    0,
+                    "0" * 64,
+                    "a" * 64,
+                ))
+            for i in range(1100):
+                rows.append((
+                    f"2026-11-20T{(i // 60) % 24:02d}:{i % 60:02d}:00+00:00",
+                    "MIST-BOH-01",
+                    "SCHEDULED",
+                    25.0,
+                    65.0,
+                    35.0,
+                    30.0,
+                    1.0,
+                    17.5,
+                    2,
+                    "Pass",
+                    "AUDIT VERIFIED",
+                    1,
+                    99.0,
+                    0,
+                    "0" * 64,
+                    "b" * 64,
+                ))
+            conn.executemany(
+                """
+                INSERT INTO cycle_records (
+                    timestamp, station_id, trigger_type, ambient_temp_c, relative_humidity_pct,
+                    flow_rate_ml_min, cycle_duration_sec, room_volume_m3, sei_score,
+                    predicted_class, efficacy_label, compliance_status, delivery_confirmed,
+                    ml_confidence, estop_triggered, prev_hash, record_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Paginate all 1,250 records in chunks of 500 (no 1,000-record cap)
+        collected_ids: set[int] = set()
+        offset = 0
+        while True:
+            code, hdrs, batch = call_api(
+                "GET",
+                "/api/v1/records",
+                headers=admin_headers,
+                query_string=f"limit=500&offset={offset}",
+            )
+            self.assertEqual(code, 200)
+            for item in batch:
+                collected_ids.add(item["id"])
+            if len(batch) < 500 or offset + len(batch) >= int(hdrs["x-filtered-count"]):
+                break
+            offset += len(batch)
+
+        self.assertEqual(len(collected_ids), 1250)
+
+        # Server-side `since` filter returns only the 1,100 recent records
+        since_code, since_hdrs, since_page1 = call_api(
+            "GET",
+            "/api/v1/records",
+            headers=admin_headers,
+            query_string="limit=500&offset=0&since=2026-11-01T00:00:00Z",
+        )
+        self.assertEqual(since_code, 200)
+        self.assertEqual(int(since_hdrs["x-filtered-count"]), 1100)
+        self.assertEqual(int(since_hdrs["x-total-count"]), 1250)
+        self.assertEqual(len(since_page1), 500)
 
 
 if __name__ == "__main__":

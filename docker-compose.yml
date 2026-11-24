@@ -1,13 +1,28 @@
 services:
   mosquitto:
-    image: eclipse-mosquitto:2
+    build:
+      context: .
+      dockerfile: mosquitto/Dockerfile
     container_name: sanmist-mosquitto
     restart: unless-stopped
     ports:
-      - "1883:1883"
+      - "8883:8883"
+    environment:
+      SANMIST_MQTT_USERNAME: ${SANMIST_MQTT_USERNAME:-sanmist_svc}
+      SANMIST_MQTT_PASSWORD: ${SANMIST_MQTT_PASSWORD:-sanmist-broker-2026}
+      SANMIST_MQTT_DEVICE_USERNAME: ${SANMIST_MQTT_DEVICE_USERNAME:-sanmist_edge}
+      SANMIST_MQTT_DEVICE_PASSWORD: ${SANMIST_MQTT_DEVICE_PASSWORD:-sanmist-edge-broker-2026}
     volumes:
       - ./mosquitto/config:/mosquitto/config:ro
       - mosquitto_data:/mosquitto/data
+      - mosquitto_certs:/mosquitto/certs
+      - mosquitto_auth:/mosquitto/auth
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /mosquitto/certs/ca.crt && nc -z 127.0.0.1 8883"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
 
   backend:
     build:
@@ -16,18 +31,23 @@ services:
     container_name: sanmist-backend
     restart: unless-stopped
     depends_on:
-      - mosquitto
+      mosquitto:
+        condition: service_healthy
     ports:
       - "8000:8000"
     environment:
       SANMIST_MQTT_BROKER: mosquitto
-      SANMIST_MQTT_PORT: "1883"
-      SANMIST_MQTT_USERNAME: ""
-      SANMIST_MQTT_PASSWORD: ""
-      SANMIST_DEVICE_KEY: sanmist-edge-key-2026
+      SANMIST_MQTT_PORT: "8883"
+      SANMIST_MQTT_TLS: "1"
+      SANMIST_MQTT_CA_CERT: /mosquitto/certs/ca.crt
+      SANMIST_MQTT_USERNAME: ${SANMIST_MQTT_USERNAME:-sanmist_svc}
+      SANMIST_MQTT_PASSWORD: ${SANMIST_MQTT_PASSWORD:-sanmist-broker-2026}
+      SANMIST_DEVICE_KEY: ${SANMIST_DEVICE_KEY:-sanmist-edge-key-2026}
       SANMIST_MQTT_REQUIRE_AUTH: "1"
+      SANMIST_CORS_ORIGINS: ${SANMIST_CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000,http://127.0.0.1:8000}
     volumes:
       - sanmist_db:/app/backend/app
+      - mosquitto_certs:/mosquitto/certs:ro
     command: ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
   frontend:
@@ -44,4 +64,6 @@ services:
 
 volumes:
   mosquitto_data:
+  mosquitto_certs:
+  mosquitto_auth:
   sanmist_db:

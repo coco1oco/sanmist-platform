@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -16,6 +17,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
+
+from backend.app.scheduler import run_schedule_tick
+from backend.app.security import (
+    configure_mqtt_client_security,
+    load_mqtt_security_config,
+    parse_cors_origins,
+    register_security_headers_middleware,
+)
 
 try:
     import xgboost as xgb
@@ -38,12 +47,14 @@ MODEL_PKL_PATH = os.path.abspath(
 )
 DB_PATH = os.getenv("SANMIST_DB_PATH", os.path.join(BASE_DIR, "sanmist_audit.db"))
 
-MQTT_BROKER_HOST = os.getenv("SANMIST_MQTT_BROKER", "broker.emqx.io")
-MQTT_BROKER_PORT = int(os.getenv("SANMIST_MQTT_PORT", "1883"))
-MQTT_BROKER_USERNAME = os.getenv("SANMIST_MQTT_USERNAME", "")
-MQTT_BROKER_PASSWORD = os.getenv("SANMIST_MQTT_PASSWORD", "")
+MQTT_SECURITY_CONFIG = load_mqtt_security_config()
+MQTT_BROKER_HOST = MQTT_SECURITY_CONFIG.host
+MQTT_BROKER_PORT = MQTT_SECURITY_CONFIG.port
+MQTT_BROKER_USERNAME = MQTT_SECURITY_CONFIG.username
+MQTT_BROKER_PASSWORD = MQTT_SECURITY_CONFIG.password
+MQTT_USE_TLS = MQTT_SECURITY_CONFIG.use_tls
 MQTT_DEVICE_KEY = os.getenv("SANMIST_DEVICE_KEY", "sanmist-edge-key-2026")
-MQTT_REQUIRE_AUTH = os.getenv("SANMIST_MQTT_REQUIRE_AUTH", "0") == "1"
+MQTT_REQUIRE_AUTH = MQTT_SECURITY_CONFIG.require_payload_auth
 MQTT_TELEMETRY_TOPIC = "sanmist/devices/+/telemetry"
 MQTT_STATUS_TOPIC = "sanmist/devices/+/status"
 MQTT_CONTROL_TOPIC = "sanmist/control/trigger"
@@ -418,6 +429,10 @@ def init_db() -> None:
         cursor.execute("ALTER TABLE device_schedules ADD COLUMN room_volume_m3 REAL NOT NULL DEFAULT 1.0")
     if "dosage_ml" not in sched_columns:
         cursor.execute("ALTER TABLE device_schedules ADD COLUMN dosage_ml REAL NOT NULL DEFAULT 10.0")
+    if "last_triggered_slot" not in sched_columns:
+        cursor.execute("ALTER TABLE device_schedules ADD COLUMN last_triggered_slot TEXT")
+    if "last_triggered_at" not in sched_columns:
+        cursor.execute("ALTER TABLE device_schedules ADD COLUMN last_triggered_at TEXT")
 
     # Seed Pre-Provisioned Devices Whitelist
     for s_num, d_info in ALLOWED_DEVICES_REGISTRY.items():
@@ -473,6 +488,8 @@ class CycleTelemetryInput(BaseModel):
     delivery_confirmed: bool = Field(default=True)
     estop_triggered: bool = Field(default=False)
     trigger_type: Optional[str] = Field(default="MANUAL_WEB")
+    auth_key: Optional[str] = Field(default=None)
+    signature: Optional[str] = Field(default=None)
 
 class CycleTriggerRequest(BaseModel):
     station_id: Optional[str] = "MIST-BOH-01"
@@ -537,6 +554,61 @@ def require_auth(authorization: Optional[str] = Header(None)) -> dict:
     user_info = {"token": row["token"], "username": row["username"], "full_name": row["full_name"], "role": row["role"]}
     conn.close()
     return user_info
+
+
+def _ensure_station_access(user: dict, station_id: str) -> None:
+    if user.get("role") == "Administrator":
+        return
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT 1 FROM user_devices WHERE user_id = ? AND serial_number = ?",
+            (user["username"], station_id),
+        )
+        if cursor.fetchone() is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Station is not linked to your account.",
+            )
+    finally:
+        conn.close()
+
+
+def _verify_telemetry_request_auth(
+    cycle: CycleTelemetryInput,
+    authorization: Optional[str],
+    x_device_key: Optional[str],
+) -> None:
+    if authorization:
+        require_auth(authorization)
+        return
+
+    station_key = _get_device_auth_key(cycle.station_id)
+    provided_header_key = (x_device_key or "").strip()
+    if provided_header_key:
+        if hmac.compare_digest(provided_header_key, MQTT_DEVICE_KEY) or (
+            station_key != MQTT_DEVICE_KEY
+            and hmac.compare_digest(provided_header_key, station_key)
+        ):
+            return
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid device authentication key.",
+        )
+
+    if cycle.auth_key or cycle.signature:
+        if _verify_mqtt_auth(cycle.model_dump()):
+            return
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid payload authentication credentials.",
+        )
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Authentication required (Bearer token or X-Device-Key).",
+    )
 
 # =========================================================
 # 6. SEI & MQTT PIPELINE
@@ -784,9 +856,14 @@ def _verify_mqtt_auth(data_dict: dict) -> bool:
     return not MQTT_REQUIRE_AUTH
 
 def _on_mqtt_connect(client, userdata, flags, reason_code, properties=None):
-    print(f"[MQTT] Connected to broker {MQTT_BROKER_HOST}")
+    transport = "MQTTS (TLS)" if MQTT_USE_TLS else "MQTT (plaintext)"
+    print(f"[MQTT] Connected to {MQTT_BROKER_HOST}:{MQTT_BROKER_PORT} via {transport} (rc={reason_code})")
     client.subscribe(MQTT_TELEMETRY_TOPIC)
     client.subscribe(MQTT_STATUS_TOPIC)
+
+
+def _on_mqtt_disconnect(client, userdata, *args):
+    print(f"[MQTT] Disconnected from {MQTT_BROKER_HOST}:{MQTT_BROKER_PORT}; automatic reconnect active.")
 
 def _on_mqtt_message(client, userdata, msg):
     try:
@@ -820,18 +897,103 @@ def _on_mqtt_message(client, userdata, msg):
 
 mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2) if hasattr(mqtt, "CallbackAPIVersion") else mqtt.Client()
 mqtt_client.on_connect = _on_mqtt_connect
+mqtt_client.on_disconnect = _on_mqtt_disconnect
 mqtt_client.on_message = _on_mqtt_message
+_mqtt_security_configured = False
+SCHEDULER_INTERVAL_SEC = max(5, int(os.getenv("SANMIST_SCHEDULER_INTERVAL_SEC", "15")))
+
+
+def _publish_start_command(
+    station_id: str,
+    duration_sec: int,
+    room_volume_m3: float,
+    trigger_type: str = "MANUAL_WEB",
+    triggered_by: str = "system",
+) -> tuple[bool, Optional[str]]:
+    if not mqtt_client.is_connected():
+        return False, "MQTT broker is disconnected; unable to dispatch cycle."
+
+    device_key = _get_device_auth_key(station_id)
+    cmd_dict = {
+        "command": "START",
+        "station_id": station_id,
+        "trigger_type": trigger_type,
+        "duration_sec": duration_sec,
+        "room_volume_m3": room_volume_m3,
+        "triggered_by": triggered_by,
+        "auth_key": device_key,
+    }
+    cmd_dict["signature"] = _compute_mqtt_signature(cmd_dict, device_key)
+    payload = json.dumps(cmd_dict)
+
+    info = mqtt_client.publish(MQTT_CONTROL_TOPIC, payload)
+    if info is None or info.rc != mqtt.MQTT_ERR_SUCCESS:
+        return False, f"MQTT publish failed (rc={getattr(info, 'rc', 'unknown')})."
+    return True, None
+
+
+def _dispatch_scheduled_cycle(
+    station_id: str,
+    duration_sec: int,
+    room_volume_m3: float,
+    trigger_type: str = "SCHEDULED",
+    triggered_by: str = "scheduler",
+) -> bool:
+    ok, err = _publish_start_command(
+        station_id=station_id,
+        duration_sec=duration_sec,
+        room_volume_m3=room_volume_m3,
+        trigger_type=trigger_type,
+        triggered_by=triggered_by,
+    )
+    if ok:
+        print(f"[SCHEDULER] Dispatched scheduled cycle for {station_id} ({duration_sec}s / {room_volume_m3} m3)")
+    elif err:
+        print(f"[SCHEDULER] Deferred scheduled cycle for {station_id}: {err}")
+    return ok
+
+
+async def _scheduler_worker_loop() -> None:
+    while True:
+        try:
+            await asyncio.to_thread(
+                run_schedule_tick, get_db_connection, _dispatch_scheduled_cycle
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            print(f"[SCHEDULER ERROR] {exc}")
+        await asyncio.sleep(SCHEDULER_INTERVAL_SEC)
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    global _mqtt_security_configured
+    scheduler_task: Optional[asyncio.Task] = None
     if os.getenv("SANMIST_DISABLE_MQTT", "0") != "1":
         try:
+            if not _mqtt_security_configured:
+                sec_meta = configure_mqtt_client_security(mqtt_client, MQTT_SECURITY_CONFIG)
+                _mqtt_security_configured = True
+                print(
+                    f"[MQTT] Security configured: tls={sec_meta['tls_enabled']} "
+                    f"creds={sec_meta['credentials_configured']} ca_cert={sec_meta['ca_cert_used']}"
+                )
             mqtt_client.connect_async(MQTT_BROKER_HOST, MQTT_BROKER_PORT, 60)
             mqtt_client.loop_start()
             print(f"[MQTT] Thread running on {MQTT_BROKER_HOST}:{MQTT_BROKER_PORT}")
         except Exception as exc:
             print(f"[WARN] MQTT setup skipped: {exc}")
+    if os.getenv("SANMIST_DISABLE_SCHEDULER", "0") != "1":
+        scheduler_task = asyncio.create_task(_scheduler_worker_loop())
+        print(f"[SCHEDULER] PHT schedule worker active (interval={SCHEDULER_INTERVAL_SEC}s)")
     yield
+    if scheduler_task is not None:
+        scheduler_task.cancel()
+        try:
+            await scheduler_task
+        except asyncio.CancelledError:
+            pass
     try:
         mqtt_client.loop_stop()
         mqtt_client.disconnect()
@@ -843,9 +1005,11 @@ async def lifespan(_: FastAPI):
 # =========================================================
 app = FastAPI(title="SanMist IoT Fleet Engine", version="2.2.0", lifespan=lifespan)
 
+register_security_headers_middleware(app)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=parse_cors_origins(os.getenv("SANMIST_CORS_ORIGINS")),
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -931,7 +1095,12 @@ def get_current_user(user: dict = Depends(require_auth)) -> dict:
     }
 
 @app.post("/api/v1/telemetry/evaluate")
-def evaluate_and_log_cycle(cycle: CycleTelemetryInput) -> dict:
+def evaluate_and_log_cycle(
+    cycle: CycleTelemetryInput,
+    authorization: Optional[str] = Header(None),
+    x_device_key: Optional[str] = Header(None, alias="X-Device-Key"),
+) -> dict:
+    _verify_telemetry_request_auth(cycle, authorization, x_device_key)
     return evaluate_telemetry_cycle(cycle)
 
 # =========================================================
@@ -939,6 +1108,11 @@ def evaluate_and_log_cycle(cycle: CycleTelemetryInput) -> dict:
 # =========================================================
 @app.get("/api/v1/user/{username}/devices")
 def get_user_devices(username: str, user: dict = Depends(require_auth)):
+    if username != user["username"] and user.get("role") != "Administrator":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot inspect another user's linked devices.",
+        )
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
@@ -1021,9 +1195,18 @@ def remove_device(serial_number: str, user: dict = Depends(require_auth)):
 # =========================================================
 @app.get("/api/v1/schedules/{serial_number}")
 def get_station_schedule(serial_number: str, user: dict = Depends(require_auth)):
+    _ensure_station_access(user, serial_number)
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT serial_number, days_of_week, start_time_pht, duration_sec, room_volume_m3, dosage_ml, is_active FROM device_schedules WHERE serial_number = ?", (serial_number,))
+    cursor.execute(
+        """
+        SELECT serial_number, days_of_week, start_time_pht, duration_sec,
+               room_volume_m3, dosage_ml, is_active, last_triggered_slot, last_triggered_at
+        FROM device_schedules
+        WHERE serial_number = ?
+        """,
+        (serial_number,),
+    )
     row = cursor.fetchone()
     conn.close()
     if not row:
@@ -1032,26 +1215,52 @@ def get_station_schedule(serial_number: str, user: dict = Depends(require_auth))
 
 @app.post("/api/v1/schedules")
 def save_schedule(payload: SchedulePayload, user: dict = Depends(require_auth)):
+    _ensure_station_access(user, payload.serial_number)
     conn = get_db_connection()
     cursor = conn.cursor()
     dur = payload.duration_sec
     vol = payload.room_volume_m3 if payload.room_volume_m3 is not None else 1.0
     dose = payload.dosage_ml if payload.dosage_ml is not None else 10.0
 
-    cursor.execute("SELECT id FROM device_schedules WHERE serial_number = ?", (payload.serial_number,))
+    cursor.execute(
+        "SELECT id, days_of_week, start_time_pht FROM device_schedules WHERE serial_number = ?",
+        (payload.serial_number,),
+    )
     existing = cursor.fetchone()
 
     if existing:
-        cursor.execute("""
-            UPDATE device_schedules
-            SET days_of_week = ?, start_time_pht = ?, duration_sec = ?, room_volume_m3 = ?, dosage_ml = ?, is_active = 1
-            WHERE serial_number = ?
-        """, (payload.days_of_week, payload.start_time_pht, dur, vol, dose, payload.serial_number))
+        slot_changed = (
+            str(existing["days_of_week"] or "") != payload.days_of_week
+            or str(existing["start_time_pht"] or "") != payload.start_time_pht
+        )
+        if slot_changed:
+            cursor.execute(
+                """
+                UPDATE device_schedules
+                SET days_of_week = ?, start_time_pht = ?, duration_sec = ?,
+                    room_volume_m3 = ?, dosage_ml = ?, is_active = 1, last_triggered_slot = NULL
+                WHERE serial_number = ?
+                """,
+                (payload.days_of_week, payload.start_time_pht, dur, vol, dose, payload.serial_number),
+            )
+        else:
+            cursor.execute(
+                """
+                UPDATE device_schedules
+                SET days_of_week = ?, start_time_pht = ?, duration_sec = ?,
+                    room_volume_m3 = ?, dosage_ml = ?, is_active = 1
+                WHERE serial_number = ?
+                """,
+                (payload.days_of_week, payload.start_time_pht, dur, vol, dose, payload.serial_number),
+            )
     else:
-        cursor.execute("""
+        cursor.execute(
+            """
             INSERT INTO device_schedules (serial_number, days_of_week, start_time_pht, duration_sec, room_volume_m3, dosage_ml, is_active)
             VALUES (?, ?, ?, ?, ?, ?, 1)
-        """, (payload.serial_number, payload.days_of_week, payload.start_time_pht, dur, vol, dose))
+            """,
+            (payload.serial_number, payload.days_of_week, payload.start_time_pht, dur, vol, dose),
+        )
 
     conn.commit()
     conn.close()
@@ -1061,12 +1270,23 @@ def save_schedule(payload: SchedulePayload, user: dict = Depends(require_auth)):
 # ROUTES: AUDIT LEDGER & MULTI-DEVICE OVERVIEW STATS
 # =========================================================
 @app.get("/api/v1/records")
-def get_audit_records(response: Response, limit: int = 50, offset: int = 0, status_filter: Optional[str] = None, status: Optional[str] = None, search: Optional[str] = None, station_id: Optional[str] = None, user: dict = Depends(require_auth)) -> list[dict]:
+def get_audit_records(
+    response: Response,
+    limit: int = 50,
+    offset: int = 0,
+    status_filter: Optional[str] = None,
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+    station_id: Optional[str] = None,
+    since: Optional[str] = None,
+    user: dict = Depends(require_auth),
+) -> list[dict]:
     safe_limit = max(1, min(limit, 5000))
     safe_offset = max(0, offset)
     selected_status = (status or status_filter or "").strip().lower()
     search_term = (search or "").strip()
     station_term = (station_id or "").strip()
+    since_term = (since or "").strip()
 
     where_clauses = []
     params = []
@@ -1074,6 +1294,20 @@ def get_audit_records(response: Response, limit: int = 50, offset: int = 0, stat
     if station_term:
         where_clauses.append("station_id = ?")
         params.append(station_term)
+
+    if since_term:
+        try:
+            since_dt = datetime.fromisoformat(since_term.replace("Z", "+00:00"))
+            if since_dt.tzinfo is None:
+                since_dt = since_dt.replace(tzinfo=timezone.utc)
+            since_utc_prefix = since_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid 'since' timestamp; expected ISO-8601 format.",
+            )
+        where_clauses.append("REPLACE(substr(timestamp, 1, 19), ' ', 'T') >= ?")
+        params.append(since_utc_prefix)
 
     if selected_status and selected_status != "all":
         if selected_status in {"e-stop", "estop", "halted"}:
@@ -1180,6 +1414,10 @@ def get_audit_stats(station_id: Optional[str] = None, user: dict = Depends(requi
         "ledger_verified": ledger_status["verified"],
         "latest_hash": ledger_status["latest_hash"],
         "mqtt_connected": mqtt_client.is_connected(),
+        "mqtt_broker_host": MQTT_BROKER_HOST,
+        "mqtt_broker_port": MQTT_BROKER_PORT,
+        "mqtt_tls_enabled": MQTT_USE_TLS,
+        "mqtt_credentials_configured": bool(MQTT_BROKER_USERNAME),
         "fleet_health": {
             "total_attached": len(claimed),
             "active_count": active_count,
@@ -1210,33 +1448,21 @@ def verify_ledger(user: dict = Depends(require_auth)) -> dict:
 # =========================================================
 @app.post("/api/v1/trigger")
 def trigger_cycle(req: CycleTriggerRequest, user: dict = Depends(require_auth)) -> dict:
-    if not mqtt_client.is_connected():
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="MQTT broker is disconnected; unable to dispatch cycle.",
-        )
-
     trigger_type = req.trigger_type or "MANUAL_WEB"
     station_id = req.station_id or "MIST-BOH-01"
-    device_key = _get_device_auth_key(station_id)
+    _ensure_station_access(user, station_id)
 
-    cmd_dict = {
-        "command": "START",
-        "station_id": station_id,
-        "trigger_type": trigger_type,
-        "duration_sec": req.duration_sec,
-        "room_volume_m3": req.room_volume_m3,
-        "triggered_by": user["username"],
-        "auth_key": device_key,
-    }
-    cmd_dict["signature"] = _compute_mqtt_signature(cmd_dict, device_key)
-    payload = json.dumps(cmd_dict)
-
-    info = mqtt_client.publish(MQTT_CONTROL_TOPIC, payload)
-    if info is None or info.rc != mqtt.MQTT_ERR_SUCCESS:
+    ok, err = _publish_start_command(
+        station_id=station_id,
+        duration_sec=req.duration_sec,
+        room_volume_m3=req.room_volume_m3,
+        trigger_type=trigger_type,
+        triggered_by=user["username"],
+    )
+    if not ok:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"MQTT publish failed (rc={getattr(info, 'rc', 'unknown')}).",
+            detail=err or "MQTT dispatch failed.",
         )
 
     return {
@@ -1249,13 +1475,17 @@ def trigger_cycle(req: CycleTriggerRequest, user: dict = Depends(require_auth)) 
     }
 
 @app.post("/api/v1/control/estop")
-def emergency_stop_cycle(req: Optional[EStopRequest] = None):
+def emergency_stop_cycle(
+    req: Optional[EStopRequest] = None,
+    user: dict = Depends(require_auth),
+):
     station_id = (req.station_id if req and req.station_id else "MIST-BOH-01").strip() or "MIST-BOH-01"
+    _ensure_station_access(user, station_id)
     device_key = _get_device_auth_key(station_id)
     abort_payload = {
         "command": "STOP",
         "station_id": station_id,
-        "triggered_by": "ui_operator",
+        "triggered_by": user["username"],
         "auth_key": device_key,
     }
     abort_payload["signature"] = _compute_mqtt_signature(abort_payload, device_key)
@@ -1274,7 +1504,12 @@ def emergency_stop_cycle(req: Optional[EStopRequest] = None):
         trigger_type="EMERGENCY_STOP",
     )
     evaluate_telemetry_cycle(cycle_abort)
-    return {"status": "HALTED", "station_id": station_id, "message": "Emergency Stop dispatched"}
+    return {
+        "status": "HALTED",
+        "station_id": station_id,
+        "triggered_by": user["username"],
+        "message": "Emergency Stop dispatched",
+    }
 
 @app.get("/health")
 def health_check() -> dict:
@@ -1283,6 +1518,10 @@ def health_check() -> dict:
         "service": "MistSan Compliance API",
         "model_loaded": model is not None,
         "mqtt_connected": mqtt_client.is_connected(),
+        "mqtt_broker_host": MQTT_BROKER_HOST,
+        "mqtt_broker_port": MQTT_BROKER_PORT,
+        "mqtt_tls_enabled": MQTT_USE_TLS,
+        "mqtt_credentials_configured": bool(MQTT_BROKER_USERNAME),
     }
 
 @app.get("/api/v1/config")

@@ -35,8 +35,8 @@ flowchart LR
         Sensors --> ESP32
     end
 
-    subgraph Broker["2. Telemetry Broker"]
-        MQTT["MQTT Broker (broker.emqx.io:1883)"]
+    subgraph Broker["2. Telemetry Broker (MQTTS TLS 8883)"]
+        MQTT["MQTT Broker (TLS 8883: Mosquitto Auth / broker.emqx.io)"]
     end
 
     subgraph Core["3. Ingestion, Auth & ML Engine (backend/ & ml-pipeline/)"]
@@ -65,8 +65,9 @@ flowchart LR
 
 - **Automated Edge Sanitization Control:** ESP32-driven misting sequence with 10-second pre-cycle buzzer warning (`tone()` at 2 kHz), real-time flow-rate sampling (potentiometer proxy for a YF-S401 flow sensor), DHT22 ambient temperature/humidity sensing, live status heartbeat publishing (`sanmist/devices/MIST-BOH-01/status`), isolated manual cycle defaults, mid-cycle remote-trigger locking, and a hardware-interrupt Emergency Stop (`E-STOP`) safety interlock.
 - **Evaporation-Adjusted SEI & ML Grading:** Evaluates each cycle across five physical parameters (`ambient_temp_c`, `relative_humidity_pct`, `flow_rate_ml_min`, `cycle_duration_sec`, `room_volume_m3`) and classifies efficacy into **Fail (`0`)**, **Marginal (`1`)**, or **Pass (`2`)** using the native XGBoost JSON model (`xgboost_sei_classifier.json`) with PD 856 threshold enforcement (`SEI >= 2.800`).
-- **Dual Ingestion Modes, Deduplication & Payload Auth:** Accepts device telemetry asynchronously via MQTT (`sanmist/devices/+/telemetry`, with a 3-second deduplication window) and live sensor heartbeats (`sanmist/devices/+/status`), as well as synchronously over HTTP (`POST /api/v1/telemetry/evaluate`). Supports shared `auth_key` and HMAC-SHA256 `signature` verification across MQTT control and telemetry payloads.
-- **Bearer-Token Authentication:** Protects operational endpoints (`/api/v1/records`, `/api/v1/stats`, `/api/v1/ledger/verify`, `/api/v1/trigger`, `/api/v1/auth/me`, `/api/v1/auth/logout`) using PBKDF2-SHA256 salted password hashes and timed session tokens persisted in SQLite (`users` and `auth_sessions`).
+- **Dual Ingestion Modes, Deduplication & Payload Auth:** Accepts device telemetry asynchronously via MQTTS over TLS (`sanmist/devices/+/telemetry`, with a 3-second deduplication window) and live sensor heartbeats (`sanmist/devices/+/status`), as well as synchronously over authenticated HTTP (`POST /api/v1/telemetry/evaluate`, requiring a Bearer token or `X-Device-Key`). Enforces `auth_key` and HMAC-SHA256 `signature` verification by default (`SANMIST_MQTT_REQUIRE_AUTH=1`).
+- **Bearer-Token Auth, Ownership & Security Headers:** Protects operational endpoints (`/api/v1/records`, `/api/v1/stats`, `/api/v1/ledger/verify`, `/api/v1/trigger`, `/api/v1/control/estop`, `/api/v1/schedules/*`, `/api/v1/user/*/devices`, `/api/v1/auth/me`, `/api/v1/auth/logout`) using PBKDF2-SHA256 salted password hashes, timed SQLite sessions, station ownership checks, configurable CORS origins, and HTTP security headers.
+- **Automated PHT Schedule Worker & Uncapped Exports:** Background `asyncio` scheduler dispatches active `device_schedules` in Philippine Time (`UTC+8`) with per-minute deduplication; CSV and PDF exports paginate through all matching records beyond 1,000 rows using server-side `since` filtering.
 - **Tamper-Evident SHA-256 Audit Ledger:** Every row in `cycle_records` is cryptographically linked to its predecessor (`prev_hash`, starting from genesis `"0" * 64`) and sealed with a deterministic SHA-256 `record_hash` over canonical cycle fields, verifiable on demand via `GET /api/v1/ledger/verify`.
 - **Command Center Dashboard UI:** Industrial compliance console with Dark/Light theme switcher, Login Overlay & admin demo quick-fill button, Live Sensor Telemetry Strip, Visual SEI Gauge, Remote Station Trigger with Live Evaporation-Adjusted SEI Preview, Pre-Dispatch Safety Confirmation Modal & active cycle countdown bar, Server-Side Pagination, Search & Status Filter Pills, SHA-256 Ledger Integrity Badge & Verify Action, expandable SHA-256 row inspector, and full filtered CSV export.
 
@@ -179,7 +180,7 @@ Start the backend server from the **repository root**:
 Once running:
 - **Interactive API Docs (Swagger UI):** http://localhost:8000/docs
 - **Health Check:** http://localhost:8000/
-- **MQTT Listener:** Automatically subscribes to `sanmist/devices/+/telemetry` on `broker.emqx.io:1883`
+- **MQTT Listener:** Automatically subscribes to `sanmist/devices/+/telemetry` over TLS (`broker.emqx.io:8883` by default, or private authenticated Mosquitto via env vars)
 - **Audit Database:** Creates, migrates, and backfills SHA-256 chains in `backend/app/sanmist_audit.db` automatically
 
 ### 4. Launch & Sign In to the Compliance Dashboard
@@ -214,7 +215,7 @@ Navigate to http://localhost:3000. On load, the **MistSan Command Center** Login
 
 ### 5. Quick Start with Docker Compose *(Optional)*
 
-To launch the local Eclipse Mosquitto MQTT broker (`:1883`), FastAPI backend (`:8000`, with `SANMIST_MQTT_REQUIRE_AUTH=1`), and frontend server (`:3000`) in containers:
+To launch the authenticated, TLS-encrypted Eclipse Mosquitto MQTT broker (`:8883`, `allow_anonymous false`, auto-provisioned local CA/server certs & credentials), FastAPI backend (`:8000`, with `SANMIST_MQTT_TLS=1` and `SANMIST_MQTT_REQUIRE_AUTH=1`), and frontend server (`:3000`) in containers:
 
 ```powershell
 docker compose up --build
@@ -347,5 +348,5 @@ Publishes an authenticated `START` command (`duration_sec`, `room_volume_m3`, `t
 
 This repository is an active prototype demonstrating an end-to-end IoT + ML compliance pipeline. Current prototype notes include:
 - **Synthetic Training Data:** The XGBoost classifier is trained on simulated BOH telemetry (`ml-pipeline/datasets/sanmist_telemetry_synthetic.csv`) rather than field sensor logs.
-- **Broker Configuration:** Local development defaults to `broker.emqx.io:1883` for Wokwi simulator compatibility, while `docker-compose.yml` provisions an isolated `eclipse-mosquitto:2` broker with `SANMIST_MQTT_REQUIRE_AUTH=1` enforcing device `auth_key` / HMAC-SHA256 signatures.
+- **Broker Configuration:** Local development and Wokwi default to TLS-encrypted `broker.emqx.io:8883` (`WiFiClientSecure` + DigiCert Global Root G2 CA), while `docker-compose.yml` provisions an isolated, authenticated TLS `eclipse-mosquitto:2` broker (`:8883`, `allow_anonymous false`) with `SANMIST_MQTT_REQUIRE_AUTH=1` enforcing device `auth_key` / HMAC-SHA256 signatures.
 - **Hardware Simulation:** Firmware defaults (`Wokwi-GUEST` Wi-Fi and `DEFAULT_MIST_DURATION_MS = 30000`) are configured for Wokwi simulation and require physical sensor/relay calibration before production deployment.
