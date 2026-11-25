@@ -1200,6 +1200,399 @@ class SanMistRouteAuthTests(unittest.TestCase):
             else:
                 main.live_station_telemetry.setdefault("MIST-BOH-01", {})["hocl_low_level"] = False
 
+    def test_presence_sensor_aborts_scheduled_only_and_respects_config_toggle(self) -> None:
+        from datetime import datetime, timezone
+        from backend.app.scheduler import run_schedule_tick
+
+        admin_headers = {"Authorization": f"Bearer {self._login_admin()}"}
+        orig_is_connected = main.mqtt_client.is_connected
+        orig_publish = main.mqtt_client.publish
+        orig_telemetry = dict(main.live_station_telemetry.get("MIST-BOH-01", {}))
+        published: list[tuple[str, str]] = []
+
+        class _FakeMsg:
+            def __init__(self, topic: str, payload: dict) -> None:
+                self.topic = topic
+                self.payload = json.dumps(payload).encode("utf-8")
+
+        class _FakePubInfo:
+            rc = main.mqtt.MQTT_ERR_SUCCESS
+
+        try:
+            main.mqtt_client.is_connected = lambda: True
+
+            def fake_publish(topic, payload):
+                published.append((topic, payload))
+                return _FakePubInfo()
+
+            main.mqtt_client.publish = fake_publish
+            device_key = main._get_device_auth_key("MIST-BOH-01")
+
+            # 1. Room occupied while presence_sensor_enabled defaults to True
+            main._on_mqtt_message(
+                None,
+                None,
+                _FakeMsg(
+                    "sanmist/devices/MIST-BOH-01/status",
+                    {
+                        "station_id": "MIST-BOH-01",
+                        "ambient_temp_c": 26.0,
+                        "relative_humidity_pct": 62.0,
+                        "flow_rate_ml_min": 30.0,
+                        "hocl_remaining_ml": 500.0,
+                        "hocl_capacity_ml": 500.0,
+                        "hocl_low_level": False,
+                        "presence_detected": True,
+                        "presence_sensor_enabled": True,
+                        "cycle_in_progress": False,
+                        "auth_key": device_key,
+                    },
+                ),
+            )
+
+            stats_code, _, stats = call_api(
+                "GET", "/api/v1/stats", headers=admin_headers, query_string="station_id=MIST-BOH-01"
+            )
+            self.assertEqual(stats_code, 200)
+            self.assertTrue(stats["live_telemetry"]["presence_detected"])
+            self.assertTrue(stats["live_telemetry"]["presence_sensor_enabled"])
+
+            # 2. Manual & Force Start cycles still work normally regardless of presence
+            for trig_type in ("MANUAL_WEB", "FORCE_START"):
+                m_code, _, m_data = call_api(
+                    "POST",
+                    "/api/v1/trigger",
+                    headers=admin_headers,
+                    body={
+                        "station_id": "MIST-BOH-01",
+                        "trigger_type": trig_type,
+                        "duration_sec": 30,
+                        "room_volume_m3": 1.0,
+                    },
+                )
+                self.assertEqual(m_code, 200)
+                self.assertEqual(m_data["status"], "DISPATCHED")
+            self.assertEqual(len(published), 2)
+            published.clear()
+
+            # 3. Scheduled auto cycle blocks on presence, skips MQTT START, and logs once
+            save_code, _, _ = call_api(
+                "POST",
+                "/api/v1/schedules",
+                headers=admin_headers,
+                body={
+                    "serial_number": "MIST-BOH-01",
+                    "days_of_week": "MON, TUE, WED, THU, FRI, SAT, SUN",
+                    "start_time_pht": "23:00:00",
+                    "duration_sec": 30,
+                    "room_volume_m3": 1.0,
+                    "dosage_ml": 15.0,
+                },
+            )
+            self.assertEqual(save_code, 200)
+
+            slot1_utc = datetime(2026, 11, 25, 15, 0, 5, tzinfo=timezone.utc)
+            slot1_later_utc = datetime(2026, 11, 25, 15, 0, 35, tzinfo=timezone.utc)
+            res1 = run_schedule_tick(main.get_db_connection, main._dispatch_scheduled_cycle, now_utc=slot1_utc)
+            self.assertEqual(len(res1), 1)
+            self.assertEqual(res1[0]["status"], "BLOCKED_PRESENCE")
+            self.assertEqual(len(published), 0)
+            self.assertEqual(
+                run_schedule_tick(main.get_db_connection, main._dispatch_scheduled_cycle, now_utc=slot1_later_utc),
+                [],
+            )
+
+            # 4. Mid-cycle scheduled presence abort telemetry is logged as OCCUPANCY INTERLOCK TRIPPED
+            main._on_mqtt_message(
+                None,
+                None,
+                _FakeMsg(
+                    "sanmist/devices/MIST-BOH-01/telemetry",
+                    {
+                        "station_id": "MIST-BOH-01",
+                        "ambient_temp_c": 26.0,
+                        "relative_humidity_pct": 62.0,
+                        "flow_rate_ml_min": 0.0,
+                        "cycle_duration_sec": 6.2,
+                        "room_volume_m3": 1.0,
+                        "delivery_confirmed": False,
+                        "estop_triggered": False,
+                        "presence_aborted": True,
+                        "trigger_type": "SCHEDULED_ABORTED_PRESENCE",
+                        "hocl_remaining_ml": 500.0,
+                        "hocl_capacity_ml": 500.0,
+                        "auth_key": device_key,
+                    },
+                ),
+            )
+
+            rec_code, _, rows = call_api("GET", "/api/v1/records", headers=admin_headers, query_string="limit=10")
+            self.assertEqual(rec_code, 200)
+            self.assertEqual(rows[0]["trigger_type"], "SCHEDULED_ABORTED_PRESENCE")
+            self.assertEqual(rows[0]["compliance_status"], "OCCUPANCY INTERLOCK TRIPPED")
+            self.assertEqual(rows[0]["efficacy_label"], "Fail")
+            self.assertEqual(rows[0]["sei_score"], 0.0)
+            self.assertEqual(rows[1]["trigger_type"], "SCHEDULED_BLOCKED_PRESENCE")
+            self.assertEqual(rows[1]["compliance_status"], "OCCUPANCY INTERLOCK BLOCKED")
+
+            ver_code, _, ver = call_api("GET", "/api/v1/ledger/verify", headers=admin_headers)
+            self.assertEqual(ver_code, 200)
+            self.assertTrue(ver["verified"])
+
+            # 5. Disabling presence sensor via config endpoint allows scheduled dispatch even while occupied
+            cfg_code, _, cfg_data = call_api(
+                "POST",
+                "/api/v1/devices/MIST-BOH-01/config",
+                headers=admin_headers,
+                body={"presence_sensor_enabled": False},
+            )
+            self.assertEqual(cfg_code, 200)
+            self.assertFalse(cfg_data["presence_sensor_enabled"])
+            self.assertEqual(len(published), 1)
+            cfg_msg = json.loads(published[0][1])
+            self.assertEqual(cfg_msg["command"], "CONFIG")
+            self.assertFalse(cfg_msg["presence_sensor_enabled"])
+            self.assertTrue(main._verify_mqtt_auth(cfg_msg))
+            published.clear()
+
+            slot2_utc = datetime(2026, 11, 26, 15, 0, 5, tzinfo=timezone.utc)
+            res2 = run_schedule_tick(main.get_db_connection, main._dispatch_scheduled_cycle, now_utc=slot2_utc)
+            self.assertEqual(len(res2), 1)
+            self.assertEqual(res2[0]["status"], "DISPATCHED")
+            self.assertEqual(len(published), 1)
+            sched_cmd = json.loads(published[0][1])
+            self.assertEqual(sched_cmd["command"], "START")
+            self.assertEqual(sched_cmd["trigger_type"], "SCHEDULED")
+        finally:
+            main.mqtt_client.is_connected = orig_is_connected
+            main.mqtt_client.publish = orig_publish
+            if orig_telemetry:
+                main.live_station_telemetry["MIST-BOH-01"] = orig_telemetry
+            else:
+                main.live_station_telemetry.setdefault("MIST-BOH-01", {})["presence_detected"] = False
+
+    def test_audit_edge_cases_boot_sync_refill_presence_estop_dedup_and_validation(self) -> None:
+        from datetime import datetime, timezone
+        from backend.app.scheduler import run_schedule_tick
+
+        admin_headers = {"Authorization": f"Bearer {self._login_admin()}"}
+        orig_is_connected = main.mqtt_client.is_connected
+        orig_publish = main.mqtt_client.publish
+        orig_telemetry = dict(main.live_station_telemetry.get("MIST-BOH-01", {}))
+        published: list[tuple[str, str]] = []
+
+        class _FakeMsg:
+            def __init__(self, topic: str, payload: dict) -> None:
+                self.topic = topic
+                self.payload = json.dumps(payload).encode("utf-8")
+
+        class _FakePubInfo:
+            rc = main.mqtt.MQTT_ERR_SUCCESS
+
+        try:
+            main.mqtt_client.is_connected = lambda: True
+
+            def fake_publish(topic, payload):
+                published.append((topic, payload))
+                return _FakePubInfo()
+
+            main.mqtt_client.publish = fake_publish
+            device_key = main._get_device_auth_key("MIST-BOH-01")
+
+            # 1. ESP32 boot_sync /status with default 500.0 mL must NOT overwrite persisted 120.0 mL reservoir
+            main._update_station_reservoir("MIST-BOH-01", remaining_ml=120.0)
+            main._on_mqtt_message(
+                None,
+                None,
+                _FakeMsg(
+                    "sanmist/devices/MIST-BOH-01/status",
+                    {
+                        "station_id": "MIST-BOH-01",
+                        "ambient_temp_c": 25.5,
+                        "relative_humidity_pct": 63.0,
+                        "flow_rate_ml_min": 30.0,
+                        "hocl_remaining_ml": 500.0,
+                        "hocl_capacity_ml": 500.0,
+                        "hocl_low_level": False,
+                        "presence_detected": True,
+                        "presence_sensor_enabled": True,
+                        "boot_sync": True,
+                        "cycle_in_progress": False,
+                        "auth_key": device_key,
+                    },
+                ),
+            )
+
+            s_boot_code, s_boot_hdrs, s_boot = call_api(
+                "GET", "/api/v1/stats", headers=admin_headers, query_string="station_id=MIST-BOH-01"
+            )
+            self.assertEqual(s_boot_code, 200)
+            self.assertEqual(s_boot_hdrs.get("cross-origin-opener-policy"), "same-origin-allow-popups")
+            self.assertEqual(s_boot["live_telemetry"]["hocl_remaining_ml"], 120.0)
+            self.assertEqual(len(published), 1)
+            boot_cfg = json.loads(published[0][1])
+            self.assertEqual(boot_cfg["command"], "CONFIG")
+            self.assertEqual(boot_cfg["hocl_remaining_ml"], 120.0)
+            self.assertTrue(boot_cfg["presence_sensor_enabled"])
+            self.assertTrue(main._verify_mqtt_auth(boot_cfg))
+            published.clear()
+
+            # 2. Refill must preserve presence_detected=True so an immediate scheduled tick blocks on presence
+            refill_code, _, _ = call_api(
+                "POST", "/api/v1/devices/MIST-BOH-01/refill", headers=admin_headers
+            )
+            self.assertEqual(refill_code, 200)
+            self.assertTrue(main.live_station_telemetry["MIST-BOH-01"]["presence_detected"])
+            published.clear()
+
+            save_code, _, _ = call_api(
+                "POST",
+                "/api/v1/schedules",
+                headers=admin_headers,
+                body={
+                    "serial_number": "MIST-BOH-01",
+                    "days_of_week": "MON, TUE, WED, THU, FRI, SAT, SUN",
+                    "start_time_pht": "23:15:00",
+                    "duration_sec": 30,
+                    "room_volume_m3": 1.0,
+                    "dosage_ml": 15.0,
+                },
+            )
+            self.assertEqual(save_code, 200)
+            slot_pres = datetime(2026, 11, 25, 15, 15, 5, tzinfo=timezone.utc)
+            res_pres = run_schedule_tick(main.get_db_connection, main._dispatch_scheduled_cycle, now_utc=slot_pres)
+            self.assertEqual(len(res_pres), 1)
+            self.assertEqual(res_pres[0]["status"], "BLOCKED_PRESENCE")
+
+            # 3. Distinct zero-flow interlock telemetry within <3s must NOT collide in MQTT dedup
+            main._on_mqtt_message(
+                None,
+                None,
+                _FakeMsg(
+                    "sanmist/devices/MIST-BOH-01/telemetry",
+                    {
+                        "station_id": "MIST-BOH-01",
+                        "ambient_temp_c": 25.5,
+                        "relative_humidity_pct": 63.0,
+                        "flow_rate_ml_min": 0.0,
+                        "cycle_duration_sec": 0.0,
+                        "room_volume_m3": 1.0,
+                        "delivery_confirmed": False,
+                        "estop_triggered": False,
+                        "hocl_aborted": True,
+                        "presence_detected": False,
+                        "trigger_type": "SCHEDULED_BLOCKED_HOCL",
+                        "hocl_remaining_ml": 45.0,
+                        "hocl_capacity_ml": 500.0,
+                        "auth_key": device_key,
+                    },
+                ),
+            )
+            # Mid-cycle HOCl depletion logs HOCL INTERLOCK TRIPPED
+            main._on_mqtt_message(
+                None,
+                None,
+                _FakeMsg(
+                    "sanmist/devices/MIST-BOH-01/telemetry",
+                    {
+                        "station_id": "MIST-BOH-01",
+                        "ambient_temp_c": 25.5,
+                        "relative_humidity_pct": 63.0,
+                        "flow_rate_ml_min": 0.0,
+                        "cycle_duration_sec": 5.0,
+                        "room_volume_m3": 1.0,
+                        "delivery_confirmed": False,
+                        "estop_triggered": False,
+                        "hocl_aborted": True,
+                        "presence_detected": False,
+                        "trigger_type": "MANUAL_WEB",
+                        "hocl_remaining_ml": 42.0,
+                        "hocl_capacity_ml": 500.0,
+                        "auth_key": device_key,
+                    },
+                ),
+            )
+
+            rec_code, _, rows = call_api("GET", "/api/v1/records", headers=admin_headers, query_string="limit=10")
+            self.assertEqual(rec_code, 200)
+            self.assertEqual(rows[0]["compliance_status"], "HOCL INTERLOCK TRIPPED")
+            self.assertEqual(rows[1]["compliance_status"], "HOCL INTERLOCK BLOCKED")
+            self.assertEqual(rows[2]["compliance_status"], "OCCUPANCY INTERLOCK BLOCKED")
+
+            # 4. UI E-Stop followed immediately (<3s) by MQTT E-Stop telemetry deduplicates row while syncing hocl_remaining_ml
+            main.live_station_telemetry["MIST-BOH-01"]["cycle_in_progress"] = True
+            estop_code, _, _ = call_api(
+                "POST", "/api/v1/control/estop", headers=admin_headers, body={"station_id": "MIST-BOH-01"}
+            )
+            self.assertEqual(estop_code, 200)
+            count_before = len(call_api("GET", "/api/v1/records", headers=admin_headers, query_string="limit=20")[2])
+
+            main._on_mqtt_message(
+                None,
+                None,
+                _FakeMsg(
+                    "sanmist/devices/MIST-BOH-01/telemetry",
+                    {
+                        "station_id": "MIST-BOH-01",
+                        "ambient_temp_c": 25.5,
+                        "relative_humidity_pct": 63.0,
+                        "flow_rate_ml_min": 0.0,
+                        "cycle_duration_sec": 4.2,
+                        "room_volume_m3": 1.0,
+                        "delivery_confirmed": False,
+                        "estop_triggered": True,
+                        "trigger_type": "MANUAL_WEB",
+                        "hocl_remaining_ml": 492.5,
+                        "hocl_capacity_ml": 500.0,
+                        "auth_key": device_key,
+                    },
+                ),
+            )
+            count_after = len(call_api("GET", "/api/v1/records", headers=admin_headers, query_string="limit=20")[2])
+            self.assertEqual(count_after, count_before)
+            self.assertEqual(main.live_station_telemetry["MIST-BOH-01"]["hocl_remaining_ml"], 492.5)
+            self.assertFalse(main.live_station_telemetry["MIST-BOH-01"]["cycle_in_progress"])
+
+            # 5. Legacy Safety Administrator role access & SchedulePayload validation
+            main._ensure_station_access({"username": "legacy_admin", "role": "Safety Administrator"}, "MIST-DISH-01")
+            bad_dur_code, _, _ = call_api(
+                "POST",
+                "/api/v1/schedules",
+                headers=admin_headers,
+                body={
+                    "serial_number": "MIST-BOH-01",
+                    "days_of_week": "MON,TUE",
+                    "start_time_pht": "23:00:00",
+                    "duration_sec": 2,
+                    "room_volume_m3": 1.0,
+                },
+            )
+            bad_time_code, _, _ = call_api(
+                "POST",
+                "/api/v1/schedules",
+                headers=admin_headers,
+                body={
+                    "serial_number": "MIST-BOH-01",
+                    "days_of_week": "MON,TUE",
+                    "start_time_pht": "99:99",
+                    "duration_sec": 30,
+                    "room_volume_m3": 1.0,
+                },
+            )
+            self.assertEqual(bad_dur_code, 422)
+            self.assertEqual(bad_time_code, 400)
+
+            ver_code, _, ver = call_api("GET", "/api/v1/ledger/verify", headers=admin_headers)
+            self.assertEqual(ver_code, 200)
+            self.assertTrue(ver["verified"])
+        finally:
+            main.mqtt_client.is_connected = orig_is_connected
+            main.mqtt_client.publish = orig_publish
+            if orig_telemetry:
+                main.live_station_telemetry["MIST-BOH-01"] = orig_telemetry
+            else:
+                main.live_station_telemetry.setdefault("MIST-BOH-01", {})["presence_detected"] = False
+
 
 class SanMistSchedulerAndExportTests(unittest.TestCase):
     def setUp(self) -> None:

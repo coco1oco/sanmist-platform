@@ -14,6 +14,7 @@
 #define PIN_BTN_START    18    // Matches diagram.json esp:18 -> btn_start (INPUT_PULLUP)
 #define PIN_BTN_ESTOP    5     // Matches diagram.json esp:5 -> btn_estop (INPUT_PULLUP)
 #define PIN_HOCL_FLOAT   35    // Matches diagram.json esp:35 -> hocl_float:2 (input-only, external SPDT 3V3/GND)
+#define PIN_PIR          27    // Matches diagram.json esp:27 -> pir:OUT (HC-SR501 presence sensor)
 
 #define DHTTYPE DHT22
 DHT dht(PIN_DHT, DHTTYPE);
@@ -74,8 +75,8 @@ MrY=
 )EOF";
 
 // Forward declarations for compiler scope resolution
-void runSanitizationCycle(unsigned long durationMs, float roomVol);
-void publishTelemetry(float temp, float hum, float flow, float durationSec, float roomVol, bool estop);
+void runSanitizationCycle(unsigned long durationMs, float roomVol, bool enforcePresence = false, const char* triggerType = "MANUAL_WEB");
+void publishTelemetry(float temp, float hum, float flow, float durationSec, float roomVol, bool estop, const char* triggerType = "MANUAL_WEB", bool presenceAborted = false, bool hoclAborted = false);
 void reconnectMQTT(bool force = false);
 
 WiFiClientSecure espClient;
@@ -88,11 +89,21 @@ float lastReportedTemp = -999.0f;
 float lastReportedHum = -999.0f;
 float lastReportedFlow = -999.0f;
 bool lastReportedHoclLow = false;
+bool lastReportedCycleInProgress = false;
 bool hasPublishedSensorStatus = false;
+bool backendSynced = false;
 bool statusSyncRequested = false;
 float hoclRemainingMl = HOCL_CAPACITY_ML;
 bool lastPhysicalFloatLow = false;
 float lastReportedHoclMl = -1.0f;
+bool presenceSensorEnabled = true;
+bool lastReportedPresence = false;
+bool remoteTriggerIsScheduled = false;
+char remoteTriggerType[32] = "MANUAL_WEB";
+
+bool isPresenceDetected() {
+    return digitalRead(PIN_PIR) == HIGH;
+}
 
 bool isPhysicalFloatLow() {
     return digitalRead(PIN_HOCL_FLOAT) == LOW;
@@ -124,7 +135,7 @@ void IRAM_ATTR handleEmergencyStop() {
 // Inbound MQTT Message Listener (Remote Dispatch)
 // -------------------------------------------------------------
 void onMqttMessage(char* topic, byte* payload, unsigned int length) {
-    char jsonBuffer[512];
+    char jsonBuffer[640];
     if (length >= sizeof(jsonBuffer)) {
         length = sizeof(jsonBuffer) - 1;
     }
@@ -167,40 +178,56 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
         if (targetMl < 0.0f) targetMl = 0.0f;
         if (targetMl > HOCL_CAPACITY_ML) targetMl = HOCL_CAPACITY_ML;
         hoclRemainingMl = targetMl;
+        backendSynced = true;
         Serial.printf("[REFILL] Reservoir refilled to %.1f / %.1f mL\n", hoclRemainingMl, HOCL_CAPACITY_ML);
         statusSyncRequested = true;
         return;
     }
 
-    // 2. Handle Remote Trigger START (defer execution to loop() to avoid re-entrant MQTT callback)
+    // 1c. Handle Device Configuration (Presence Interlock Toggle & Boot Reservoir Sync)
+    if (strcmp(command, "CONFIG") == 0) {
+        if (!doc["presence_sensor_enabled"].isNull()) {
+            presenceSensorEnabled = doc["presence_sensor_enabled"].as<bool>();
+            Serial.printf(
+                "[CONFIG] Presence sensor interlock (scheduled cycles) -> %s\n",
+                presenceSensorEnabled ? "ENABLED" : "DISABLED"
+            );
+        }
+        if (!doc["hocl_remaining_ml"].isNull()) {
+            float targetMl = doc["hocl_remaining_ml"].as<float>();
+            if (targetMl < 0.0f) targetMl = 0.0f;
+            if (targetMl > HOCL_CAPACITY_ML) targetMl = HOCL_CAPACITY_ML;
+            hoclRemainingMl = targetMl;
+            Serial.printf("[CONFIG] Synced persisted HOCl reservoir -> %.1f / %.1f mL\n", hoclRemainingMl, HOCL_CAPACITY_ML);
+        }
+        backendSynced = true;
+        statusSyncRequested = true;
+        return;
+    }
+
+    // 2. Handle Remote Trigger START (defer execution & safety interlocks to loop() so ledger telemetry can publish safely)
     if (strcmp(command, "START") == 0) {
         if (cycleInProgress || remoteTriggerRequested) {
             Serial.println("[WARN] Trigger ignored: Cycle already in progress.");
             return;
         }
+        const char* trigType = doc["trigger_type"] | "MANUAL_WEB";
+        bool isScheduled = (strcmp(trigType, "SCHEDULED") == 0);
         int durationSec = doc["duration_sec"] | 30;
         if (durationSec < 5) durationSec = 5;
         if (durationSec > 300) durationSec = 300;
         unsigned long requestedMs = (unsigned long)durationSec * 1000UL;
-        if (!hasEnoughHoclFor(requestedMs)) {
-            float neededMl = estimateRequiredMl(requestedMs);
-            float usableMl = max(0.0f, hoclRemainingMl - HOCL_LOW_THRESHOLD_ML);
-            Serial.printf(
-                "[INTERLOCK] Remote START rejected: needs %.1f mL, only %.1f mL usable (%.1f/%.0f mL remaining)\n",
-                neededMl,
-                usableMl,
-                hoclRemainingMl,
-                HOCL_CAPACITY_ML
-            );
-            statusSyncRequested = true;
-            return;
-        }
         float roomVol = doc["room_volume_m3"] | 1.0f;
         if (roomVol <= 0.0f) roomVol = DEFAULT_ROOM_VOLUME_M3;
         remoteMistDurationMs = requestedMs;
         remoteRoomVolumeM3 = roomVol;
+        remoteTriggerIsScheduled = isScheduled;
+        strncpy(remoteTriggerType, trigType, sizeof(remoteTriggerType) - 1);
+        remoteTriggerType[sizeof(remoteTriggerType) - 1] = '\0';
         remoteTriggerRequested = true;
-        Serial.print("[REMOTE TRIGGER] Queued! Duration: ");
+        Serial.print("[REMOTE TRIGGER] Queued (");
+        Serial.print(remoteTriggerType);
+        Serial.print(")! Duration: ");
         Serial.print(durationSec);
         Serial.println(" s");
     }
@@ -254,10 +281,13 @@ void pollAndPublishLiveSensors(bool forcePublish = false) {
     int potValue = analogRead(PIN_POT);
     float flow = map(potValue, 0, 4095, 10, 50); // mL/min proxy
     bool hoclLow = isHoclLow();
+    bool presenceDetected = isPresenceDetected();
 
     if (forcePublish ||
         !hasPublishedSensorStatus ||
         hoclLow != lastReportedHoclLow ||
+        presenceDetected != lastReportedPresence ||
+        cycleInProgress != lastReportedCycleInProgress ||
         fabs(hoclRemainingMl - lastReportedHoclMl) >= 1.0f ||
         fabs(temp - lastReportedTemp) >= 0.2f ||
         fabs(hum - lastReportedHum) >= 0.5f ||
@@ -266,32 +296,41 @@ void pollAndPublishLiveSensors(bool forcePublish = false) {
         lastReportedHum = hum;
         lastReportedFlow = flow;
         lastReportedHoclLow = hoclLow;
+        lastReportedPresence = presenceDetected;
+        lastReportedCycleInProgress = cycleInProgress;
         lastReportedHoclMl = hoclRemainingMl;
         hasPublishedSensorStatus = true;
 
         Serial.printf(
-            "[SENSOR] Live DHT22 & Flow -> Temp: %.1f C | Hum: %.1f %% | Flow: %.1f mL/min | HOCl: %.1f/%.0f mL (%s)\n",
+            "[SENSOR] Live DHT22 & Flow -> Temp: %.1f C | Hum: %.1f %% | Flow: %.1f mL/min | HOCl: %.1f/%.0f mL (%s) | PIR: %s (%s)\n",
             temp,
             hum,
             flow,
             hoclRemainingMl,
             HOCL_CAPACITY_ML,
-            hoclLow ? "LOW (DEPLETED)" : "OK"
+            hoclLow ? "LOW (DEPLETED)" : "OK",
+            presenceDetected ? "OCCUPIED" : "CLEAR",
+            presenceSensorEnabled ? "ON" : "OFF"
         );
 
         if (client.connected()) {
             JsonDocument doc;
-            doc["station_id"] = "MIST-BOH-01";
+            doc["station_id"] = device_station_id;
             doc["ambient_temp_c"] = temp;
             doc["relative_humidity_pct"] = hum;
             doc["flow_rate_ml_min"] = flow;
             doc["hocl_low_level"] = hoclLow;
             doc["hocl_remaining_ml"] = roundf(hoclRemainingMl * 10.0f) / 10.0f;
             doc["hocl_capacity_ml"] = HOCL_CAPACITY_ML;
+            doc["presence_detected"] = presenceDetected;
+            doc["presence_sensor_enabled"] = presenceSensorEnabled;
             doc["cycle_in_progress"] = cycleInProgress;
+            if (!backendSynced) {
+                doc["boot_sync"] = true;
+            }
             doc["auth_key"] = device_auth_key;
 
-            char buffer[384];
+            char buffer[448];
             serializeJson(doc, buffer, sizeof(buffer));
             client.publish(status_topic, buffer);
         }
@@ -351,8 +390,8 @@ void reconnectMQTT(bool force) {
     }
 }
 
-void publishTelemetry(float temp, float hum, float flow, float durationSec, float roomVol, bool estop) {
-    client.setBufferSize(512);
+void publishTelemetry(float temp, float hum, float flow, float durationSec, float roomVol, bool estop, const char* triggerType, bool presenceAborted, bool hoclAborted) {
+    client.setBufferSize(640);
 
     // CRITICAL: Reconnect BEFORE publishing if the connection dropped during misting
     if (!client.connected()) {
@@ -361,19 +400,23 @@ void publishTelemetry(float temp, float hum, float flow, float durationSec, floa
     }
 
     JsonDocument doc;
-    doc["station_id"] = "MIST-BOH-01";
+    doc["station_id"] = device_station_id;
     doc["ambient_temp_c"] = isnan(temp) ? 25.0f : temp;
     doc["relative_humidity_pct"] = isnan(hum) ? 65.0f : hum;
-    doc["flow_rate_ml_min"] = (estop) ? 0.0f : flow;
+    doc["flow_rate_ml_min"] = (estop || presenceAborted || hoclAborted) ? 0.0f : flow;
     doc["cycle_duration_sec"] = durationSec;
     doc["room_volume_m3"] = roomVol;
-    doc["delivery_confirmed"] = (flow > 5.0f && !estop);
+    doc["delivery_confirmed"] = (flow > 5.0f && !estop && !presenceAborted && !hoclAborted);
     doc["estop_triggered"] = estop;
+    doc["presence_aborted"] = presenceAborted;
+    doc["hocl_aborted"] = hoclAborted;
+    doc["presence_detected"] = isPresenceDetected();
+    doc["trigger_type"] = triggerType;
     doc["hocl_remaining_ml"] = roundf(hoclRemainingMl * 10.0f) / 10.0f;
     doc["hocl_capacity_ml"] = HOCL_CAPACITY_ML;
     doc["auth_key"] = device_auth_key;
 
-    char buffer[448];
+    char buffer[640];
     serializeJson(doc, buffer, sizeof(buffer));
 
     bool sent = client.publish(telemetry_topic, buffer);
@@ -386,8 +429,25 @@ void publishTelemetry(float temp, float hum, float flow, float durationSec, floa
     }
 }
 
-void runSanitizationCycle(unsigned long durationMs, float roomVol) {
+void runSanitizationCycle(unsigned long durationMs, float roomVol, bool enforcePresence, const char* triggerType) {
+    if (enforcePresence && presenceSensorEnabled && isPresenceDetected()) {
+        float latestTemp = 28.5f;
+        float latestHum = 65.0f;
+        readSanitizedEnvironment(latestTemp, latestHum);
+        Serial.println("[INTERLOCK] Scheduled cycle blocked: person detected in room!");
+        tone(PIN_BUZZER, BUZZER_FREQ_HZ);
+        delay(250);
+        noTone(PIN_BUZZER);
+        digitalWrite(PIN_BUZZER, LOW);
+        publishTelemetry(latestTemp, latestHum, 0.0f, 0.0f, roomVol, false, "SCHEDULED_BLOCKED_PRESENCE", true, false);
+        statusSyncRequested = true;
+        return;
+    }
+
     if (!hasEnoughHoclFor(durationMs)) {
+        float latestTemp = 28.5f;
+        float latestHum = 65.0f;
+        readSanitizedEnvironment(latestTemp, latestHum);
         float neededMl = estimateRequiredMl(durationMs);
         float usableMl = max(0.0f, hoclRemainingMl - HOCL_LOW_THRESHOLD_ML);
         Serial.printf(
@@ -401,6 +461,9 @@ void runSanitizationCycle(unsigned long durationMs, float roomVol) {
         delay(250);
         noTone(PIN_BUZZER);
         digitalWrite(PIN_BUZZER, LOW);
+        if (strcmp(triggerType, "SCHEDULED") == 0) {
+            publishTelemetry(latestTemp, latestHum, 0.0f, 0.0f, roomVol, false, "SCHEDULED_BLOCKED_HOCL", false, true);
+        }
         statusSyncRequested = true;
         return;
     }
@@ -419,11 +482,20 @@ void runSanitizationCycle(unsigned long durationMs, float roomVol) {
 
     unsigned long bzStart = millis();
     while (millis() - bzStart < 10000) {
+        if (enforcePresence && presenceSensorEnabled && isPresenceDetected()) {
+            noTone(PIN_BUZZER);
+            digitalWrite(PIN_BUZZER, LOW);
+            Serial.println("[INTERLOCK] Scheduled warning aborted: person detected in room!");
+            publishTelemetry(latestTemp, latestHum, 0.0f, (millis() - cycleStart) / 1000.0f, roomVol, false, "SCHEDULED_ABORTED_PRESENCE", true, false);
+            cycleInProgress = false;
+            statusSyncRequested = true;
+            return;
+        }
         if (isHoclLow()) {
             noTone(PIN_BUZZER);
             digitalWrite(PIN_BUZZER, LOW);
             Serial.println("[INTERLOCK] Pre-cycle warning aborted: HOCl reservoir depleted!");
-            publishTelemetry(latestTemp, latestHum, 0.0f, (millis() - cycleStart) / 1000.0f, roomVol, false);
+            publishTelemetry(latestTemp, latestHum, 0.0f, (millis() - cycleStart) / 1000.0f, roomVol, false, triggerType, false, true);
             cycleInProgress = false;
             statusSyncRequested = true;
             return;
@@ -434,8 +506,9 @@ void runSanitizationCycle(unsigned long durationMs, float roomVol) {
             noTone(PIN_BUZZER);
             digitalWrite(PIN_BUZZER, LOW);
             Serial.println("[HALT] E-Stop triggered during pre-cycle warning!");
-            publishTelemetry(latestTemp, latestHum, 0.0f, (millis() - cycleStart) / 1000.0f, roomVol, true);
+            publishTelemetry(latestTemp, latestHum, 0.0f, (millis() - cycleStart) / 1000.0f, roomVol, true, triggerType, false, false);
             cycleInProgress = false;
+            statusSyncRequested = true;
             return;
         }
         client.loop(); // Keep MQTT alive during warning
@@ -454,12 +527,22 @@ void runSanitizationCycle(unsigned long durationMs, float roomVol) {
     int samples = 0;
 
     while (millis() - mistStart < durationMs) {
+        if (enforcePresence && presenceSensorEnabled && isPresenceDetected()) {
+            digitalWrite(PIN_ATOMIZER, LOW);
+            Serial.println("[INTERLOCK] Scheduled misting aborted mid-cycle: person detected in room!");
+            readSanitizedEnvironment(latestTemp, latestHum);
+            float earlyDuration = (millis() - mistStart) / 1000.0f;
+            publishTelemetry(latestTemp, latestHum, 0.0f, earlyDuration, roomVol, false, "SCHEDULED_ABORTED_PRESENCE", true, false);
+            cycleInProgress = false;
+            statusSyncRequested = true;
+            return;
+        }
         if (isHoclLow()) {
             digitalWrite(PIN_ATOMIZER, LOW);
             Serial.println("[INTERLOCK] Misting halted: HOCl reservoir depleted mid-cycle!");
             readSanitizedEnvironment(latestTemp, latestHum);
             float earlyDuration = (millis() - mistStart) / 1000.0f;
-            publishTelemetry(latestTemp, latestHum, 0.0f, earlyDuration, roomVol, false);
+            publishTelemetry(latestTemp, latestHum, 0.0f, earlyDuration, roomVol, false, triggerType, false, true);
             cycleInProgress = false;
             statusSyncRequested = true;
             return;
@@ -471,8 +554,9 @@ void runSanitizationCycle(unsigned long durationMs, float roomVol) {
             digitalWrite(PIN_ATOMIZER, LOW);
             readSanitizedEnvironment(latestTemp, latestHum);
             float earlyDuration = (millis() - mistStart) / 1000.0f;
-            publishTelemetry(latestTemp, latestHum, 0.0f, earlyDuration, roomVol, true);
+            publishTelemetry(latestTemp, latestHum, 0.0f, earlyDuration, roomVol, true, triggerType, false, false);
             cycleInProgress = false;
+            statusSyncRequested = true;
             return;
         }
 
@@ -511,7 +595,7 @@ void runSanitizationCycle(unsigned long durationMs, float roomVol) {
     lastReportedHum = latestHum;
     lastReportedFlow = avgFlow;
 
-    publishTelemetry(latestTemp, latestHum, avgFlow, actualDurationSec, roomVol, false);
+    publishTelemetry(latestTemp, latestHum, avgFlow, actualDurationSec, roomVol, false, triggerType, false);
     statusSyncRequested = true;
 }
 
@@ -525,6 +609,7 @@ void setup() {
     pinMode(PIN_BTN_START, INPUT_PULLUP);
     pinMode(PIN_BTN_ESTOP, INPUT_PULLUP);
     pinMode(PIN_HOCL_FLOAT, INPUT);
+    pinMode(PIN_PIR, INPUT);
     lastPhysicalFloatLow = isPhysicalFloatLow();
 
     attachInterrupt(digitalPinToInterrupt(PIN_BTN_ESTOP), handleEmergencyStop, FALLING);
@@ -535,7 +620,7 @@ void setup() {
     espClient.setHandshakeTimeout(60);    // seconds (generous for Wokwi simulated TLS handshake)
     client.setServer(mqtt_server_host, mqtt_port);
     client.setCallback(onMqttMessage);
-    client.setBufferSize(512);
+    client.setBufferSize(640);
     client.setSocketTimeout(30);
 
     Serial.println("--- MistSan ESP32 Firmware Ready (MQTTS TLS) ---");
@@ -552,12 +637,13 @@ void loop() {
     bool physLow = isPhysicalFloatLow();
     if (lastPhysicalFloatLow && !physLow) {
         hoclRemainingMl = HOCL_CAPACITY_ML;
+        backendSynced = true;
         Serial.printf("[REFILL] Float switch restored -> reservoir reset to %.1f mL\n", hoclRemainingMl);
         statusSyncRequested = true;
     }
     lastPhysicalFloatLow = physLow;
 
-    if (statusSyncRequested || (hasPublishedSensorStatus && isHoclLow() != lastReportedHoclLow)) {
+    if (statusSyncRequested || (hasPublishedSensorStatus && (isHoclLow() != lastReportedHoclLow || isPresenceDetected() != lastReportedPresence))) {
         statusSyncRequested = false;
         pollAndPublishLiveSensors(true);
     }
@@ -566,21 +652,21 @@ void loop() {
         pollAndPublishLiveSensors();
     }
 
-    // Physical manual start button check uses fixed manual defaults
+    // Physical manual start button check uses fixed manual defaults (disregards presence sensor)
     if (!cycleInProgress && digitalRead(PIN_BTN_START) == LOW) {
         delay(30); // Debounce
         if (digitalRead(PIN_BTN_START) == LOW) {
-            runSanitizationCycle(DEFAULT_MIST_DURATION_MS, DEFAULT_ROOM_VOLUME_M3);
+            runSanitizationCycle(DEFAULT_MIST_DURATION_MS, DEFAULT_ROOM_VOLUME_M3, false, "MANUAL_BUTTON");
             while (digitalRead(PIN_BTN_START) == LOW) {
                 delay(10);
             }
         }
     }
 
-    // Remote Web MQTT Trigger uses requested remote parameters
+    // Remote Web / Scheduled MQTT Trigger uses requested parameters (presence enforced only on SCHEDULED)
     if (remoteTriggerRequested) {
         remoteTriggerRequested = false;
-        runSanitizationCycle(remoteMistDurationMs, remoteRoomVolumeM3);
+        runSanitizationCycle(remoteMistDurationMs, remoteRoomVolumeM3, remoteTriggerIsScheduled, remoteTriggerType);
     }
 
     delay(10); // Prevents CPU starvation and watchdog timeouts

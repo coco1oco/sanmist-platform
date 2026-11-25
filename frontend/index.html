@@ -1126,6 +1126,10 @@
                   <span class="muted">Attached Fleet Health</span>
                   <span class="val mono"><span class="dot"></span><span id="fleet-health-summary">--</span></span>
                 </div>
+                <div class="link-row tone-pass" id="row-presence">
+                  <span class="muted">Room Presence (Scheduled Guard)</span>
+                  <span class="val mono"><span class="dot"></span><span id="presence-status">Clear (Auto-Schedule ON)</span></span>
+                </div>
               </div>
             </div>
           </div>
@@ -1182,6 +1186,13 @@
               <p id="sched-summary-text" class="summary-line">--</p>
               <span id="sched-sei-chip" class="chip mono tone-pass" style="align-self:flex-start;">Est. SEI --</span>
             </div>
+            <label class="card check" style="margin:0;">
+              <input id="sched-presence-toggle" type="checkbox" checked onchange="togglePresenceSensor(this.checked)" />
+              <span>
+                <strong style="display:block;font-size:12px;">Presence Safety Interlock (PIR · Scheduled Only)</strong>
+                <span class="muted" style="font-size:11px;font-weight:400;">Aborts scheduled auto-cycles if someone is sensed in the room. Manual cycles always disregard this sensor.</span>
+              </span>
+            </label>
           </aside>
 
           <!-- Dynamic Schedule Slot (Form OR Active Schedule Card) -->
@@ -1295,6 +1306,16 @@
               <span class="tiny-label">Linked Stations</span>
               <div id="device-list-container" style="display:flex;flex-direction:column;gap:12px;"></div>
             </div>
+            <div style="border-top:1px solid var(--border);padding-top:20px;display:flex;flex-direction:column;gap:10px;">
+              <span class="tiny-label">Station Safety Configuration</span>
+              <label class="card check" style="margin:0;">
+                <input id="settings-presence-toggle" type="checkbox" checked onchange="togglePresenceSensor(this.checked)" />
+                <span>
+                  <strong style="display:block;font-size:12px;">Presence Sensor (PIR · Scheduled Only)</strong>
+                  <span class="muted" style="font-size:11px;font-weight:400;">Aborts scheduled auto-cycles when a person is sensed. Manual &amp; Force Start cycles ignore it.</span>
+                </span>
+              </label>
+            </div>
           </aside>
           <div class="panel form-card">
             <div>
@@ -1350,6 +1371,9 @@
 
     let pollTimer = null;
     let countdownTimer = null;
+    let countdownBaselineRecordId = 0;
+    let countdownSawHardwareActive = false;
+    let lastKnownStationRecordId = 0;
     let activeStatusFilter = "all";
     let currentRecords = [];
     let currentPage = 1;
@@ -1824,6 +1848,10 @@
       $("reg-welcome")?.classList.toggle("hidden", !isEmpty);
       $("view-overview")?.classList.toggle("is-empty", isEmpty);
       $("btn-fab-start-cycle")?.classList.toggle("fab-hidden", isEmpty);
+      ["btn-refill-hocl", "sched-presence-toggle", "settings-presence-toggle"].forEach((id) => {
+        const el = $(id);
+        if (el) el.disabled = isEmpty;
+      });
     }
 
     async function loadFleetDevices() {
@@ -1902,6 +1930,8 @@
     function onStationChanged(serial) {
       activeStation = serial;
       currentPage = 1;
+      lastKnownStationRecordId = 0;
+      countdownBaselineRecordId = 0;
       refreshDashboard();
       if (!$("view-schedules")?.classList.contains("hidden")) {
         loadActiveStationSchedule();
@@ -2460,6 +2490,8 @@
         : cap;
       const thresh = Number(telemetry.hocl_low_threshold_ml) > 0 ? Number(telemetry.hocl_low_threshold_ml) : 50;
       const low = Boolean(telemetry.hocl_low_level ?? false) || rem <= thresh;
+      const presenceDetected = Boolean(telemetry.presence_detected ?? false);
+      const presenceEnabled = telemetry.presence_sensor_enabled === undefined ? true : Boolean(telemetry.presence_sensor_enabled);
       liveSensorState = {
         temp: Number(telemetry.ambient_temp_c) || 25.0,
         hum: Number(telemetry.relative_humidity_pct) || 65.0,
@@ -2467,11 +2499,24 @@
         hoclLow: low,
         hoclRemainingMl: rem,
         hoclCapacityMl: cap,
-        hoclLowThresholdMl: thresh
+        hoclLowThresholdMl: thresh,
+        presenceDetected,
+        presenceEnabled
       };
       if ($("sensor-temp")) $("sensor-temp").textContent = `${liveSensorState.temp.toFixed(1)} °C`;
       if ($("sensor-hum")) $("sensor-hum").textContent = `${liveSensorState.hum.toFixed(1)} %`;
       if ($("sensor-flow")) $("sensor-flow").textContent = `${liveSensorState.flow.toFixed(1)} mL/min`;
+
+      if ($("presence-status")) {
+        $("presence-status").textContent = !presenceEnabled
+          ? "Disabled (Bypassed)"
+          : presenceDetected
+            ? "Person Detected (Auto-Guard)"
+            : "Clear (Auto-Schedule ON)";
+      }
+      setTone($("row-presence"), !presenceEnabled ? "muted" : presenceDetected ? "warn" : "pass");
+      if ($("sched-presence-toggle")) $("sched-presence-toggle").checked = presenceEnabled;
+      if ($("settings-presence-toggle")) $("settings-presence-toggle").checked = presenceEnabled;
 
       const pct = Math.max(0, Math.min(100, (rem / cap) * 100));
       const badge = $("hocl-badge");
@@ -2509,15 +2554,85 @@
       }
     }
 
+    async function togglePresenceSensor(enabled) {
+      const prevState = liveSensorState?.presenceEnabled ?? true;
+      if (!activeStation) {
+        if ($("sched-presence-toggle")) $("sched-presence-toggle").checked = prevState;
+        if ($("settings-presence-toggle")) $("settings-presence-toggle").checked = prevState;
+        toast("Select or register a station first.");
+        return;
+      }
+      try {
+        const res = await authFetch(`/api/v1/devices/${encodeURIComponent(activeStation)}/config`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ presence_sensor_enabled: Boolean(enabled) })
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || "Failed to update presence sensor setting");
+        }
+        toast(`Presence safety interlock ${enabled ? "enabled" : "disabled"} for ${activeStation} (scheduled cycles).`);
+        await refreshDashboard();
+      } catch (err) {
+        if ($("sched-presence-toggle")) $("sched-presence-toggle").checked = prevState;
+        if ($("settings-presence-toggle")) $("settings-presence-toggle").checked = prevState;
+        alert(err.message);
+      }
+    }
+
     function classify(r) {
       const isEstop = Boolean(r.estop_triggered) || r.compliance_status === "SAFETY INTERLOCK TRIPPED";
       const isHoclBlocked = r.compliance_status === "HOCL INTERLOCK BLOCKED" || r.trigger_type === "SCHEDULED_BLOCKED_HOCL";
-      const safetyText = isEstop ? "E-Stop Active" : isHoclBlocked ? "HOCl Low (Blocked)" : "Normal Delivery";
+      const isHoclTripped = r.compliance_status === "HOCL INTERLOCK TRIPPED";
+      const isPresenceAbort = r.compliance_status === "OCCUPANCY INTERLOCK TRIPPED" || r.trigger_type === "SCHEDULED_ABORTED_PRESENCE";
+      const isPresenceBlocked = r.compliance_status === "OCCUPANCY INTERLOCK BLOCKED" || r.trigger_type === "SCHEDULED_BLOCKED_PRESENCE";
+      const isInterlock = isEstop || isHoclBlocked || isHoclTripped || isPresenceAbort || isPresenceBlocked;
+      const safetyText = isEstop
+        ? "E-Stop Active"
+        : isHoclBlocked
+          ? "HOCl Low (Blocked)"
+          : isHoclTripped
+            ? "HOCl Depleted (Halted)"
+            : isPresenceAbort
+              ? "Occupancy Abort"
+              : isPresenceBlocked
+                ? "Occupancy Blocked"
+                : "Normal Delivery";
+      const interlockTileText = isEstop
+        ? "E-Stop Active"
+        : isPresenceAbort
+          ? "Occupancy Abort"
+          : isPresenceBlocked
+            ? "Occupancy Blocked"
+            : isHoclTripped
+              ? "HOCl Depleted"
+              : isHoclBlocked
+                ? "HOCl Blocked"
+                : "Normal";
+      const interlockTone = isEstop
+        ? "estop"
+        : isPresenceBlocked
+          ? "warn"
+          : (isPresenceAbort || isHoclTripped || isHoclBlocked)
+            ? "fail"
+            : "pass";
+      const headlineOverride = isEstop
+        ? "Last cycle halted by E-Stop"
+        : isPresenceAbort
+          ? "Scheduled cycle aborted — person detected"
+          : isPresenceBlocked
+            ? "Scheduled cycle blocked — room occupied"
+            : isHoclTripped
+              ? "Cycle halted — HOCl reservoir depleted"
+              : isHoclBlocked
+                ? "Scheduled cycle blocked — insufficient HOCl"
+                : null;
       const label = String(r.efficacy_label ?? "").toLowerCase();
-      if (isEstop) return { key: "estop", cls: "status-estop", text: "HALTED (E-STOP)", tone: "estop", isEstop: true, isHoclBlocked: false, safetyText };
-      if (label === "marginal" || Number(r.predicted_class) === 1) return { key: "marginal", cls: "status-marginal", text: "MARGINAL", tone: "warn", isEstop: false, isHoclBlocked, safetyText };
-      if (label === "fail" || Number(r.predicted_class) === 0) return { key: "fail", cls: "status-fail", text: "FAIL", tone: "fail", isEstop: false, isHoclBlocked, safetyText };
-      return { key: "pass", cls: "status-pass", text: "PASS", tone: "pass", isEstop: false, isHoclBlocked, safetyText };
+      if (isEstop) return { key: "estop", cls: "status-estop", text: "HALTED (E-STOP)", tone: "estop", isEstop: true, isHoclBlocked: false, isInterlock, interlockTileText, interlockTone, headlineOverride, safetyText };
+      if (label === "marginal" || Number(r.predicted_class) === 1) return { key: "marginal", cls: "status-marginal", text: "MARGINAL", tone: "warn", isEstop: false, isHoclBlocked, isInterlock, interlockTileText, interlockTone, headlineOverride, safetyText };
+      if (label === "fail" || Number(r.predicted_class) === 0) return { key: "fail", cls: "status-fail", text: "FAIL", tone: "fail", isEstop: false, isHoclBlocked, isInterlock, interlockTileText, interlockTone, headlineOverride, safetyText };
+      return { key: "pass", cls: "status-pass", text: "PASS", tone: "pass", isEstop: false, isHoclBlocked, isInterlock, interlockTileText, interlockTone, headlineOverride, safetyText };
     }
 
     function syncExpandWidth() {
@@ -2555,7 +2670,13 @@
         const recordHash = r.record_hash ? String(r.record_hash).trim() : "";
         const prevHash = r.prev_hash ? String(r.prev_hash).trim() : "";
         const triggerType = r.trigger_type || "MANUAL";
-        const triggerTone = triggerType === "SCHEDULED" ? "tone-pass" : triggerType === "SCHEDULED_BLOCKED_HOCL" ? "tone-fail" : triggerType === "FORCE_START" ? "tone-warn" : "tone-info";
+        const triggerTone = triggerType === "SCHEDULED"
+          ? "tone-pass"
+          : (triggerType === "SCHEDULED_BLOCKED_HOCL" || triggerType === "SCHEDULED_BLOCKED_PRESENCE" || triggerType === "SCHEDULED_ABORTED_PRESENCE")
+            ? "tone-fail"
+            : triggerType === "FORCE_START"
+              ? "tone-warn"
+              : "tone-info";
 
         const main = `
           <tr class="row" data-toggle-row="${rowId}">
@@ -2735,6 +2856,23 @@
           if ($("sensor-source-badge")) $("sensor-source-badge").textContent = mqttOk ? "LIVE" : "CACHED";
         }
 
+        const latestStationRecordId = latestRows.length > 0 ? (Number(latestRows[0].id) || 0) : 0;
+        lastKnownStationRecordId = latestStationRecordId;
+        if (isCycleRunning && countdownTimer) {
+          if (stats.live_telemetry?.cycle_in_progress) {
+            countdownSawHardwareActive = true;
+          }
+          const hasNewStationRecord = latestStationRecordId > countdownBaselineRecordId;
+          const hardwareFinishedCycle = countdownSawHardwareActive && stats.live_telemetry?.cycle_in_progress === false;
+          if (hasNewStationRecord || hardwareFinishedCycle) {
+            clearInterval(countdownTimer);
+            countdownTimer = null;
+            $("cycle-progress-panel")?.classList.add("hidden");
+            updateEStopVisualState(false);
+            updateFloatingButton(false);
+          }
+        }
+
         if (latestRows.length > 0) {
           const l = latestRows[0];
           const c = classify(l);
@@ -2747,7 +2885,7 @@
             fail: "Cycle failed the efficacy check",
             estop: "Last cycle halted by E-Stop"
           };
-          if ($("stat-headline")) $("stat-headline").textContent = headlines[c.key] || "Awaiting cycle data...";
+          if ($("stat-headline")) $("stat-headline").textContent = c.headlineOverride || headlines[c.key] || "Awaiting cycle data...";
           const badge = $("stat-outcome-badge");
           if (badge) {
             badge.textContent = c.key === "estop" ? "E-STOP" : c.text;
@@ -2761,8 +2899,8 @@
             $("stat-confidence").textContent = l.ml_confidence ? `${Number(l.ml_confidence).toFixed(1)}%` : "Rule Check";
           }
           if ($("stat-safety")) {
-            $("stat-safety").textContent = c.isEstop ? "Interlock Active" : "Normal";
-            setTone($("tile-safety"), c.isEstop ? "estop" : "pass");
+            $("stat-safety").textContent = c.interlockTileText;
+            setTone($("tile-safety"), c.interlockTone);
           }
           const pct = Math.max(0, Math.min(100, (sei / (SEI_TARGET * 1.5)) * 100));
           if ($("sei-gauge-bar")) $("sei-gauge-bar").style.width = `${pct}%`;
@@ -2864,6 +3002,9 @@
 
     function startCycleCountdown(durationSec) {
       if (countdownTimer) clearInterval(countdownTimer);
+      const latestStationRow = currentRecords.find((r) => !activeStation || r.station_id === activeStation);
+      countdownBaselineRecordId = Math.max(lastKnownStationRecordId, Number(latestStationRow?.id || 0));
+      countdownSawHardwareActive = false;
       const panel = $("cycle-progress-panel");
       const phaseLabel = $("cycle-phase-label");
       const countdownEl = $("cycle-countdown");

@@ -134,6 +134,9 @@ def register_security_headers_middleware(app: FastAPI) -> None:
         response.headers.setdefault(
             "Permissions-Policy", "camera=(), microphone=(), geolocation=()"
         )
+        response.headers.setdefault(
+            "Cross-Origin-Opener-Policy", "same-origin-allow-popups"
+        )
         forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
         if request.url.scheme == "https" or forwarded_proto == "https":
             response.headers.setdefault(

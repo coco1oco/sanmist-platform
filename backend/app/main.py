@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from backend.app.scheduler import run_schedule_tick
+from backend.app.scheduler import normalize_days_of_week, normalize_hhmm, run_schedule_tick
 from backend.app.security import (
     configure_mqtt_client_security,
     load_mqtt_security_config,
@@ -62,6 +62,7 @@ SESSION_TTL_HOURS = int(os.getenv("SANMIST_SESSION_TTL_HOURS", "24"))
 GENESIS_HASH = "0" * 64
 DEFAULT_HOCL_CAPACITY_ML = 500.0
 DEFAULT_HOCL_LOW_THRESHOLD_ML = 50.0
+ADMIN_ROLES = {"Administrator", "Safety Administrator"}
 
 # =========================================================
 # 2. PRE-PROVISIONED DEVICES REGISTRY (WHITELIST)
@@ -101,6 +102,8 @@ live_station_telemetry: dict[str, dict] = {
         "hocl_remaining_ml": DEFAULT_HOCL_CAPACITY_ML,
         "hocl_capacity_ml": DEFAULT_HOCL_CAPACITY_ML,
         "hocl_low_threshold_ml": DEFAULT_HOCL_LOW_THRESHOLD_ML,
+        "presence_detected": False,
+        "presence_sensor_enabled": True,
         "is_defect": False,
         "cycle_in_progress": False,
         "updated_at": datetime.now(timezone.utc).isoformat()
@@ -403,6 +406,7 @@ def init_db() -> None:
             hocl_capacity_ml REAL NOT NULL DEFAULT 500.0,
             hocl_remaining_ml REAL NOT NULL DEFAULT 500.0,
             hocl_low_threshold_ml REAL NOT NULL DEFAULT 50.0,
+            presence_sensor_enabled INTEGER NOT NULL DEFAULT 1,
             registered_at TEXT NOT NULL
         )
     """)
@@ -415,6 +419,8 @@ def init_db() -> None:
         cursor.execute("ALTER TABLE devices ADD COLUMN hocl_remaining_ml REAL NOT NULL DEFAULT 500.0")
     if "hocl_low_threshold_ml" not in dev_columns:
         cursor.execute("ALTER TABLE devices ADD COLUMN hocl_low_threshold_ml REAL NOT NULL DEFAULT 50.0")
+    if "presence_sensor_enabled" not in dev_columns:
+        cursor.execute("ALTER TABLE devices ADD COLUMN presence_sensor_enabled INTEGER NOT NULL DEFAULT 1")
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS user_devices (
@@ -505,11 +511,17 @@ class CycleTelemetryInput(BaseModel):
     room_volume_m3: float = Field(default=1.0, gt=0, le=200.0)
     delivery_confirmed: bool = Field(default=True)
     estop_triggered: bool = Field(default=False)
+    presence_aborted: bool = Field(default=False)
+    hocl_aborted: bool = Field(default=False)
+    presence_detected: Optional[bool] = Field(default=None)
     trigger_type: Optional[str] = Field(default="MANUAL_WEB")
     hocl_remaining_ml: Optional[float] = Field(default=None, ge=0.0, le=10000.0)
     hocl_capacity_ml: Optional[float] = Field(default=None, gt=0.0, le=10000.0)
     auth_key: Optional[str] = Field(default=None)
     signature: Optional[str] = Field(default=None)
+
+class DeviceConfigPayload(BaseModel):
+    presence_sensor_enabled: bool
 
 class CycleTriggerRequest(BaseModel):
     station_id: Optional[str] = "MIST-BOH-01"
@@ -538,8 +550,8 @@ class SchedulePayload(BaseModel):
     serial_number: str
     days_of_week: str
     start_time_pht: str
-    duration_sec: int
-    room_volume_m3: Optional[float] = 1.0
+    duration_sec: int = Field(..., ge=5, le=300)
+    room_volume_m3: Optional[float] = Field(default=1.0, gt=0, le=200.0)
     dosage_ml: Optional[float] = 10.0
 
 def require_auth(authorization: Optional[str] = Header(None)) -> dict:
@@ -577,7 +589,7 @@ def require_auth(authorization: Optional[str] = Header(None)) -> dict:
 
 
 def _ensure_station_access(user: dict, station_id: str) -> None:
-    if user.get("role") == "Administrator":
+    if user.get("role") in ADMIN_ROLES:
         return
     conn = get_db_connection()
     try:
@@ -660,6 +672,24 @@ def evaluate_telemetry_cycle(
         predicted_class = 0
         efficacy_label = "Fail"
         compliance_status = compliance_status_override
+    elif cycle.presence_aborted or trigger_type in {"SCHEDULED_ABORTED_PRESENCE", "SCHEDULED_BLOCKED_PRESENCE"}:
+        sei_score = 0.0
+        predicted_class = 0
+        efficacy_label = "Fail"
+        compliance_status = (
+            "OCCUPANCY INTERLOCK TRIPPED"
+            if trigger_type == "SCHEDULED_ABORTED_PRESENCE"
+            else "OCCUPANCY INTERLOCK BLOCKED"
+        )
+    elif cycle.hocl_aborted or trigger_type == "SCHEDULED_BLOCKED_HOCL":
+        sei_score = 0.0
+        predicted_class = 0
+        efficacy_label = "Fail"
+        compliance_status = (
+            "HOCL INTERLOCK BLOCKED"
+            if trigger_type == "SCHEDULED_BLOCKED_HOCL"
+            else "HOCL INTERLOCK TRIPPED"
+        )
     else:
         sei_score = compute_evaporation_adjusted_sei(cycle)
         is_compliant = sei_score >= 2.800
@@ -713,6 +743,8 @@ def evaluate_telemetry_cycle(
                       AND flow_rate_ml_min = ?
                       AND cycle_duration_sec = ?
                       AND estop_triggered = ?
+                      AND trigger_type = ?
+                      AND compliance_status = ?
                     ORDER BY id DESC
                     LIMIT 1
                     """,
@@ -721,6 +753,8 @@ def evaluate_telemetry_cycle(
                         cycle.flow_rate_ml_min,
                         cycle.cycle_duration_sec,
                         estop_int,
+                        trigger_type,
+                        compliance_status,
                     ),
                 )
             recent = cursor.fetchone()
@@ -740,6 +774,41 @@ def evaluate_telemetry_cycle(
                         print(
                             f"[MQTT DEDUP] Ignored duplicate MQTT telemetry already recorded as cycle #{recent['id']}"
                         )
+                        if cycle.hocl_remaining_ml is not None or cycle.presence_detected is not None:
+                            prev_tel = live_station_telemetry.get(cycle.station_id, {})
+                            if cycle.hocl_remaining_ml is not None:
+                                reservoir = _update_station_reservoir(
+                                    cycle.station_id,
+                                    remaining_ml=cycle.hocl_remaining_ml,
+                                    capacity_ml=cycle.hocl_capacity_ml,
+                                )
+                            else:
+                                reservoir = _get_station_reservoir(cycle.station_id)
+                            float_low = bool(prev_tel.get("hocl_float_low", False))
+                            effective_low = float_low or (
+                                reservoir["hocl_remaining_ml"] <= reservoir["hocl_low_threshold_ml"]
+                            )
+                            presence_val = (
+                                bool(cycle.presence_detected)
+                                if cycle.presence_detected is not None
+                                else bool(prev_tel.get("presence_detected", False))
+                            )
+                            live_station_telemetry[cycle.station_id] = {
+                                "station_id": cycle.station_id,
+                                "ambient_temp_c": float(prev_tel.get("ambient_temp_c", cycle.ambient_temp_c)),
+                                "relative_humidity_pct": float(prev_tel.get("relative_humidity_pct", cycle.relative_humidity_pct)),
+                                "flow_rate_ml_min": float(prev_tel.get("flow_rate_ml_min", cycle.flow_rate_ml_min)),
+                                "hocl_low_level": effective_low,
+                                "hocl_float_low": float_low,
+                                "hocl_remaining_ml": reservoir["hocl_remaining_ml"],
+                                "hocl_capacity_ml": reservoir["hocl_capacity_ml"],
+                                "hocl_low_threshold_ml": reservoir["hocl_low_threshold_ml"],
+                                "presence_detected": presence_val,
+                                "presence_sensor_enabled": _get_station_presence_enabled(cycle.station_id),
+                                "is_defect": bool(prev_tel.get("is_defect", False)),
+                                "cycle_in_progress": False,
+                                "updated_at": now_dt.isoformat(),
+                            }
                         return {
                             "duplicate": True,
                             "id": recent["id"],
@@ -805,9 +874,14 @@ def evaluate_telemetry_cycle(
     finally:
         conn.close()
 
+    is_presence_interlock = cycle.presence_aborted or trigger_type in {
+        "SCHEDULED_ABORTED_PRESENCE",
+        "SCHEDULED_BLOCKED_PRESENCE",
+    }
+    is_hocl_interlock = cycle.hocl_aborted or trigger_type == "SCHEDULED_BLOCKED_HOCL"
     consumed_ml = (
         0.0
-        if (cycle.estop_triggered or compliance_status_override is not None)
+        if (cycle.estop_triggered or compliance_status_override is not None or is_presence_interlock or is_hocl_interlock)
         else round((cycle.flow_rate_ml_min * (cycle.cycle_duration_sec / 60.0)), 2)
     )
     reservoir = _update_station_reservoir(
@@ -819,6 +893,11 @@ def evaluate_telemetry_cycle(
     prev_tel = live_station_telemetry.get(cycle.station_id, {})
     float_low = bool(prev_tel.get("hocl_float_low", False))
     effective_low = float_low or (reservoir["hocl_remaining_ml"] <= reservoir["hocl_low_threshold_ml"])
+    presence_val = (
+        bool(cycle.presence_detected)
+        if cycle.presence_detected is not None
+        else bool(prev_tel.get("presence_detected", False) or is_presence_interlock)
+    )
     live_station_telemetry[cycle.station_id] = {
         "station_id": cycle.station_id,
         "ambient_temp_c": float(prev_tel.get("ambient_temp_c", cycle.ambient_temp_c)),
@@ -829,6 +908,8 @@ def evaluate_telemetry_cycle(
         "hocl_remaining_ml": reservoir["hocl_remaining_ml"],
         "hocl_capacity_ml": reservoir["hocl_capacity_ml"],
         "hocl_low_threshold_ml": reservoir["hocl_low_threshold_ml"],
+        "presence_detected": presence_val,
+        "presence_sensor_enabled": _get_station_presence_enabled(cycle.station_id),
         "is_defect": bool(prev_tel.get("is_defect", False)),
         "cycle_in_progress": False,
         "updated_at": recorded_at,
@@ -858,11 +939,24 @@ def _compute_mqtt_signature(data_dict: dict, secret: str = MQTT_DEVICE_KEY) -> s
     """Compute deterministic HMAC-SHA256 over canonical MQTT payload fields."""
     station_id = str(data_dict.get("station_id") or "MIST-BOH-01")
     if "command" in data_dict:
-        msg = (
-            f"CMD|{data_dict.get('command')}|"
-            f"{int(data_dict.get('duration_sec', 30))}|"
-            f"{float(data_dict.get('room_volume_m3', 1.0)):.2f}"
-        )
+        cmd = str(data_dict.get("command") or "")
+        if cmd == "CONFIG":
+            msg = (
+                f"CMD|CONFIG|{station_id}|"
+                f"{1 if data_dict.get('presence_sensor_enabled', True) else 0}|"
+                f"{float(data_dict.get('hocl_remaining_ml', -1.0)):.2f}"
+            )
+        elif cmd == "REFILL":
+            msg = (
+                f"CMD|REFILL|{station_id}|"
+                f"{float(data_dict.get('hocl_remaining_ml', DEFAULT_HOCL_CAPACITY_ML)):.2f}"
+            )
+        else:
+            msg = (
+                f"CMD|{cmd}|{station_id}|{data_dict.get('trigger_type', '')}|"
+                f"{int(data_dict.get('duration_sec', 30))}|"
+                f"{float(data_dict.get('room_volume_m3', 1.0)):.2f}"
+            )
     elif "cycle_duration_sec" in data_dict:
         msg = (
             f"TEL|{station_id}|"
@@ -942,7 +1036,10 @@ def _on_mqtt_message(client, userdata, msg):
             reported_low = bool(data_dict.get("hocl_low_level", False))
             raw_remaining = data_dict.get("hocl_remaining_ml")
             raw_capacity = data_dict.get("hocl_capacity_ml")
-            if raw_remaining is not None:
+            is_boot_sync = bool(data_dict.get("boot_sync", False))
+            if is_boot_sync:
+                reservoir = _get_station_reservoir(station_id)
+            elif raw_remaining is not None:
                 reservoir = _update_station_reservoir(
                     station_id,
                     remaining_ml=float(raw_remaining),
@@ -952,6 +1049,8 @@ def _on_mqtt_message(client, userdata, msg):
                 reservoir = _get_station_reservoir(station_id)
             effective_low = reported_low or (reservoir["hocl_remaining_ml"] <= reservoir["hocl_low_threshold_ml"])
             float_low = bool(reported_low and reservoir["hocl_remaining_ml"] > reservoir["hocl_low_threshold_ml"])
+            presence_enabled = _get_station_presence_enabled(station_id)
+            presence_detected = bool(data_dict.get("presence_detected", False))
             live_station_telemetry[station_id] = {
                 "station_id": station_id,
                 "ambient_temp_c": float(data_dict.get("ambient_temp_c", 25.0)),
@@ -962,10 +1061,25 @@ def _on_mqtt_message(client, userdata, msg):
                 "hocl_remaining_ml": reservoir["hocl_remaining_ml"],
                 "hocl_capacity_ml": reservoir["hocl_capacity_ml"],
                 "hocl_low_threshold_ml": reservoir["hocl_low_threshold_ml"],
+                "presence_detected": presence_detected,
+                "presence_sensor_enabled": presence_enabled,
                 "is_defect": bool(data_dict.get("is_defect", False)),
                 "cycle_in_progress": bool(data_dict.get("cycle_in_progress", False)),
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
+            if is_boot_sync and mqtt_client.is_connected():
+                _publish_device_config(
+                    station_id,
+                    presence_enabled,
+                    triggered_by="boot_sync",
+                    hocl_remaining_ml=reservoir["hocl_remaining_ml"],
+                )
+            elif (
+                "presence_sensor_enabled" in data_dict
+                and bool(data_dict["presence_sensor_enabled"]) != presence_enabled
+                and mqtt_client.is_connected()
+            ):
+                _publish_device_config(station_id, presence_enabled, triggered_by="config_sync")
             return
 
         cycle_in = CycleTelemetryInput(**data_dict)
@@ -1088,6 +1202,58 @@ def _update_station_reservoir(
         conn.close()
 
 
+def _get_station_presence_enabled(station_id: str) -> bool:
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT presence_sensor_enabled FROM devices WHERE serial_number = ?",
+            (station_id,),
+        )
+        row = cursor.fetchone()
+    finally:
+        conn.close()
+    if row is None or row["presence_sensor_enabled"] is None:
+        return True
+    return bool(row["presence_sensor_enabled"])
+
+
+def _set_station_presence_enabled(station_id: str, enabled: bool) -> bool:
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE devices SET presence_sensor_enabled = ? WHERE serial_number = ?",
+            (1 if enabled else 0, station_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return bool(enabled)
+
+
+def _publish_device_config(
+    station_id: str,
+    presence_sensor_enabled: bool,
+    triggered_by: str = "system",
+    hocl_remaining_ml: Optional[float] = None,
+) -> None:
+    if not mqtt_client.is_connected():
+        return
+    device_key = _get_device_auth_key(station_id)
+    cfg_cmd = {
+        "command": "CONFIG",
+        "station_id": station_id,
+        "presence_sensor_enabled": bool(presence_sensor_enabled),
+        "triggered_by": triggered_by,
+        "auth_key": device_key,
+    }
+    if hocl_remaining_ml is not None:
+        cfg_cmd["hocl_remaining_ml"] = round(float(hocl_remaining_ml), 2)
+    cfg_cmd["signature"] = _compute_mqtt_signature(cfg_cmd, device_key)
+    mqtt_client.publish(MQTT_CONTROL_TOPIC, json.dumps(cfg_cmd))
+
+
 def _is_station_hocl_low(station_id: str) -> bool:
     if bool(live_station_telemetry.get(station_id, {}).get("hocl_low_level", False)):
         return True
@@ -1153,6 +1319,31 @@ def _dispatch_scheduled_cycle(
             f"({info['remaining_ml']:.1f} mL remaining)."
         )
         return "BLOCKED_HOCL"
+    if _get_station_presence_enabled(station_id) and bool(
+        live_station_telemetry.get(station_id, {}).get("presence_detected", False)
+    ):
+        tel = live_station_telemetry.get(station_id, {})
+        blocked_cycle = CycleTelemetryInput(
+            station_id=station_id,
+            ambient_temp_c=float(tel.get("ambient_temp_c", 25.0)),
+            relative_humidity_pct=float(tel.get("relative_humidity_pct", 65.0)),
+            flow_rate_ml_min=0.0,
+            cycle_duration_sec=0.0,
+            room_volume_m3=room_volume_m3,
+            delivery_confirmed=False,
+            estop_triggered=False,
+            presence_aborted=True,
+            trigger_type="SCHEDULED_BLOCKED_PRESENCE",
+        )
+        evaluate_telemetry_cycle(
+            blocked_cycle,
+            compliance_status_override="OCCUPANCY INTERLOCK BLOCKED",
+        )
+        print(
+            f"[SCHEDULER] Blocked scheduled cycle for {station_id} and logged to ledger: "
+            "person detected in room."
+        )
+        return "BLOCKED_PRESENCE"
     ok, err = _publish_start_command(
         station_id=station_id,
         duration_sec=duration_sec,
@@ -1236,27 +1427,29 @@ app.add_middleware(
 @app.post("/api/v1/auth/login")
 def login(credentials: LoginRequest) -> dict:
     conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT username, password_hash, salt, full_name, role FROM users WHERE username = ?", (credentials.username.strip(),))
-    user_row = cursor.fetchone()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT username, password_hash, salt, full_name, role FROM users WHERE username = ?", (credentials.username.strip(),))
+        user_row = cursor.fetchone()
 
-    if not user_row or not _verify_password(credentials.password, user_row["password_hash"], user_row["salt"]):
+        if not user_row or not _verify_password(credentials.password, user_row["password_hash"], user_row["salt"]):
+            raise HTTPException(status_code=401, detail="Invalid username or password")
+
+        token = secrets.token_urlsafe(32)
+        now = datetime.now(timezone.utc)
+        expires_at = now + timedelta(hours=SESSION_TTL_HOURS)
+        cursor.execute(
+            "INSERT INTO auth_sessions (token, username, full_name, role, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (token, user_row["username"], user_row["full_name"], user_row["role"], now.isoformat(), expires_at.isoformat())
+        )
+        conn.commit()
+        return {"access_token": token, "token_type": "bearer", "user": {"username": user_row["username"], "full_name": user_row["full_name"], "role": user_row["role"]}}
+    finally:
         conn.close()
-        raise HTTPException(status_code=401, detail="Invalid username or password")
-
-    token = secrets.token_urlsafe(32)
-    now = datetime.now(timezone.utc)
-    expires_at = now + timedelta(hours=SESSION_TTL_HOURS)
-    cursor.execute(
-        "INSERT INTO auth_sessions (token, username, full_name, role, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
-        (token, user_row["username"], user_row["full_name"], user_row["role"], now.isoformat(), expires_at.isoformat())
-    )
-    conn.commit()
-    conn.close()
-    return {"access_token": token, "token_type": "bearer", "user": {"username": user_row["username"], "full_name": user_row["full_name"], "role": user_row["role"]}}
 
 @app.post("/api/v1/auth/google")
 def auth_google(payload: GoogleAuthPayload):
+    conn = None
     try:
         token_url = f"https://oauth2.googleapis.com/tokeninfo?id_token={payload.id_token}"
         req = urllib.request.Request(token_url, headers={"User-Agent": "SanMist-Platform"})
@@ -1286,10 +1479,14 @@ def auth_google(payload: GoogleAuthPayload):
         expires_at = now + timedelta(days=7)
         cursor.execute("INSERT OR REPLACE INTO auth_sessions (token, username, full_name, role, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)", (session_token, user_profile["username"], user_profile["full_name"], user_profile["role"], now.isoformat(), expires_at.isoformat()))
         conn.commit()
-        conn.close()
         return {"access_token": session_token, "user": user_profile}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=401, detail=f"Google Authentication Error: {str(e)}")
+    finally:
+        if conn is not None:
+            conn.close()
 
 @app.post("/api/v1/auth/logout")
 def logout(user: dict = Depends(require_auth)) -> dict:
@@ -1322,23 +1519,25 @@ def evaluate_and_log_cycle(
 # =========================================================
 @app.get("/api/v1/user/{username}/devices")
 def get_user_devices(username: str, user: dict = Depends(require_auth)):
-    if username != user["username"] and user.get("role") != "Administrator":
+    if username != user["username"] and user.get("role") not in ADMIN_ROLES:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Cannot inspect another user's linked devices.",
         )
     conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT ud.serial_number, ud.nickname, ud.room_volume_m3, d.model_name
-        FROM user_devices ud
-        JOIN devices d ON ud.serial_number = d.serial_number
-        WHERE ud.user_id = ?
-        ORDER BY ud.id ASC
-    """, (username,))
-    rows = cursor.fetchall()
-    conn.close()
-    return [{"serial_number": row["serial_number"], "nickname": row["nickname"], "room_volume_m3": row["room_volume_m3"], "model_name": row["model_name"]} for row in rows]
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT ud.serial_number, ud.nickname, ud.room_volume_m3, d.model_name
+            FROM user_devices ud
+            JOIN devices d ON ud.serial_number = d.serial_number
+            WHERE ud.user_id = ?
+            ORDER BY ud.id ASC
+        """, (username,))
+        rows = cursor.fetchall()
+        return [{"serial_number": row["serial_number"], "nickname": row["nickname"], "room_volume_m3": row["room_volume_m3"], "model_name": row["model_name"]} for row in rows]
+    finally:
+        conn.close()
 
 @app.post("/api/v1/devices/claim")
 def claim_device(payload: ClaimDevicePayload, user: dict = Depends(require_auth)):
@@ -1357,20 +1556,21 @@ def claim_device(payload: ClaimDevicePayload, user: dict = Depends(require_auth)
         raise HTTPException(status_code=401, detail="Invalid Device Authentication Key.")
 
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
 
-    cursor.execute("SELECT id FROM user_devices WHERE user_id = ? AND serial_number = ?", (user["username"], serial))
-    if cursor.fetchone():
+        cursor.execute("SELECT id FROM user_devices WHERE user_id = ? AND serial_number = ?", (user["username"], serial))
+        if cursor.fetchone():
+            raise HTTPException(status_code=400, detail="This station is already linked to your account.")
+
+        cursor.execute("""
+            INSERT INTO user_devices (user_id, serial_number, nickname, room_volume_m3, paired_at)
+            VALUES (?, ?, ?, ?, datetime('now'))
+        """, (user["username"], serial, nickname, payload.room_volume_m3 or expected_info["default_volume"]))
+        cursor.execute("UPDATE devices SET is_claimed = 1 WHERE serial_number = ?", (serial,))
+        conn.commit()
+    finally:
         conn.close()
-        raise HTTPException(status_code=400, detail="This station is already linked to your account.")
-
-    cursor.execute("""
-        INSERT INTO user_devices (user_id, serial_number, nickname, room_volume_m3, paired_at)
-        VALUES (?, ?, ?, ?, datetime('now'))
-    """, (user["username"], serial, nickname, payload.room_volume_m3 or expected_info["default_volume"]))
-    cursor.execute("UPDATE devices SET is_claimed = 1 WHERE serial_number = ?", (serial,))
-    conn.commit()
-    conn.close()
 
     # Initialize live telemetry slot if not yet populated
     if serial not in live_station_telemetry:
@@ -1385,6 +1585,8 @@ def claim_device(payload: ClaimDevicePayload, user: dict = Depends(require_auth)
             "hocl_remaining_ml": reservoir["hocl_remaining_ml"],
             "hocl_capacity_ml": reservoir["hocl_capacity_ml"],
             "hocl_low_threshold_ml": reservoir["hocl_low_threshold_ml"],
+            "presence_detected": False,
+            "presence_sensor_enabled": _get_station_presence_enabled(serial),
             "is_defect": False,
             "cycle_in_progress": False,
             "updated_at": datetime.now(timezone.utc).isoformat()
@@ -1418,6 +1620,8 @@ def refill_device_reservoir(serial_number: str, user: dict = Depends(require_aut
         "hocl_remaining_ml": updated["hocl_remaining_ml"],
         "hocl_capacity_ml": updated["hocl_capacity_ml"],
         "hocl_low_threshold_ml": updated["hocl_low_threshold_ml"],
+        "presence_detected": bool(prev.get("presence_detected", False)),
+        "presence_sensor_enabled": _get_station_presence_enabled(serial_number),
         "is_defect": bool(prev.get("is_defect", False)),
         "cycle_in_progress": bool(prev.get("cycle_in_progress", False)),
         "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -1442,22 +1646,65 @@ def refill_device_reservoir(serial_number: str, user: dict = Depends(require_aut
         "hocl_capacity_ml": updated["hocl_capacity_ml"],
     }
 
+@app.post("/api/v1/devices/{serial_number}/config")
+def update_device_config(
+    serial_number: str,
+    payload: DeviceConfigPayload,
+    user: dict = Depends(require_auth),
+):
+    _ensure_station_access(user, serial_number)
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT serial_number FROM devices WHERE serial_number = ?", (serial_number,))
+        if cursor.fetchone() is None:
+            raise HTTPException(status_code=404, detail="Device not found.")
+    finally:
+        conn.close()
+
+    enabled = _set_station_presence_enabled(serial_number, payload.presence_sensor_enabled)
+    prev = live_station_telemetry.get(serial_number, {})
+    reservoir = _get_station_reservoir(serial_number)
+    live_station_telemetry[serial_number] = {
+        "station_id": serial_number,
+        "ambient_temp_c": float(prev.get("ambient_temp_c", 25.0)),
+        "relative_humidity_pct": float(prev.get("relative_humidity_pct", 65.0)),
+        "flow_rate_ml_min": float(prev.get("flow_rate_ml_min", 30.0)),
+        "hocl_low_level": bool(prev.get("hocl_low_level", False)),
+        "hocl_float_low": bool(prev.get("hocl_float_low", False)),
+        "hocl_remaining_ml": reservoir["hocl_remaining_ml"],
+        "hocl_capacity_ml": reservoir["hocl_capacity_ml"],
+        "hocl_low_threshold_ml": reservoir["hocl_low_threshold_ml"],
+        "presence_detected": bool(prev.get("presence_detected", False)),
+        "presence_sensor_enabled": enabled,
+        "is_defect": bool(prev.get("is_defect", False)),
+        "cycle_in_progress": bool(prev.get("cycle_in_progress", False)),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _publish_device_config(serial_number, enabled, triggered_by=user["username"])
+    return {
+        "status": "UPDATED",
+        "station_id": serial_number,
+        "presence_sensor_enabled": enabled,
+    }
+
 @app.delete("/api/v1/devices/{serial_number}")
 def remove_device(serial_number: str, user: dict = Depends(require_auth)):
     conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id FROM user_devices WHERE user_id = ? AND serial_number = ?", (user["username"], serial_number))
-    row = cursor.fetchone()
-    if not row:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Device not found in your linked fleet.")
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM user_devices WHERE user_id = ? AND serial_number = ?", (user["username"], serial_number))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Device not found in your linked fleet.")
 
-    cursor.execute("DELETE FROM user_devices WHERE user_id = ? AND serial_number = ?", (user["username"], serial_number))
-    cursor.execute("DELETE FROM device_schedules WHERE serial_number = ?", (serial_number,))
-    cursor.execute("UPDATE devices SET is_claimed = 0 WHERE serial_number = ?", (serial_number,))
-    conn.commit()
-    conn.close()
-    return {"status": "DELETED", "serial_number": serial_number}
+        cursor.execute("DELETE FROM user_devices WHERE user_id = ? AND serial_number = ?", (user["username"], serial_number))
+        cursor.execute("DELETE FROM device_schedules WHERE serial_number = ?", (serial_number,))
+        cursor.execute("UPDATE devices SET is_claimed = 0 WHERE serial_number = ?", (serial_number,))
+        conn.commit()
+        return {"status": "DELETED", "serial_number": serial_number}
+    finally:
+        conn.close()
 
 # =========================================================
 # ROUTES: SCHEDULES (Safe SQLite Check-then-Update)
@@ -1466,74 +1713,90 @@ def remove_device(serial_number: str, user: dict = Depends(require_auth)):
 def get_station_schedule(serial_number: str, user: dict = Depends(require_auth)):
     _ensure_station_access(user, serial_number)
     conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        SELECT serial_number, days_of_week, start_time_pht, duration_sec,
-               room_volume_m3, dosage_ml, is_active, last_triggered_slot, last_triggered_at
-        FROM device_schedules
-        WHERE serial_number = ?
-        """,
-        (serial_number,),
-    )
-    row = cursor.fetchone()
-    conn.close()
-    if not row:
-        raise HTTPException(status_code=404, detail="No schedule found")
-    return dict(row)
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT serial_number, days_of_week, start_time_pht, duration_sec,
+                   room_volume_m3, dosage_ml, is_active, last_triggered_slot, last_triggered_at
+            FROM device_schedules
+            WHERE serial_number = ?
+            """,
+            (serial_number,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="No schedule found")
+        return dict(row)
+    finally:
+        conn.close()
 
 @app.post("/api/v1/schedules")
 def save_schedule(payload: SchedulePayload, user: dict = Depends(require_auth)):
     _ensure_station_access(user, payload.serial_number)
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    dur = payload.duration_sec
-    vol = payload.room_volume_m3 if payload.room_volume_m3 is not None else 1.0
-    dose = payload.dosage_ml if payload.dosage_ml is not None else 10.0
-
-    cursor.execute(
-        "SELECT id, days_of_week, start_time_pht FROM device_schedules WHERE serial_number = ?",
-        (payload.serial_number,),
-    )
-    existing = cursor.fetchone()
-
-    if existing:
-        slot_changed = (
-            str(existing["days_of_week"] or "") != payload.days_of_week
-            or str(existing["start_time_pht"] or "") != payload.start_time_pht
+    days = normalize_days_of_week(payload.days_of_week)
+    if not days:
+        raise HTTPException(
+            status_code=400,
+            detail="Select at least one valid weekday (MON-SUN).",
         )
-        if slot_changed:
-            cursor.execute(
-                """
-                UPDATE device_schedules
-                SET days_of_week = ?, start_time_pht = ?, duration_sec = ?,
-                    room_volume_m3 = ?, dosage_ml = ?, is_active = 1, last_triggered_slot = NULL
-                WHERE serial_number = ?
-                """,
-                (payload.days_of_week, payload.start_time_pht, dur, vol, dose, payload.serial_number),
+    hhmm = normalize_hhmm(payload.start_time_pht)
+    if hhmm is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid schedule time; expected HH:MM (24-hour PHT).",
+        )
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        dur = payload.duration_sec
+        vol = payload.room_volume_m3 if payload.room_volume_m3 is not None else 1.0
+        dose = payload.dosage_ml if payload.dosage_ml is not None else 10.0
+
+        cursor.execute(
+            "SELECT id, days_of_week, start_time_pht FROM device_schedules WHERE serial_number = ?",
+            (payload.serial_number,),
+        )
+        existing = cursor.fetchone()
+
+        if existing:
+            slot_changed = (
+                str(existing["days_of_week"] or "") != payload.days_of_week
+                or str(existing["start_time_pht"] or "") != payload.start_time_pht
             )
+            if slot_changed:
+                cursor.execute(
+                    """
+                    UPDATE device_schedules
+                    SET days_of_week = ?, start_time_pht = ?, duration_sec = ?,
+                        room_volume_m3 = ?, dosage_ml = ?, is_active = 1, last_triggered_slot = NULL
+                    WHERE serial_number = ?
+                    """,
+                    (payload.days_of_week, payload.start_time_pht, dur, vol, dose, payload.serial_number),
+                )
+            else:
+                cursor.execute(
+                    """
+                    UPDATE device_schedules
+                    SET days_of_week = ?, start_time_pht = ?, duration_sec = ?,
+                        room_volume_m3 = ?, dosage_ml = ?, is_active = 1
+                    WHERE serial_number = ?
+                    """,
+                    (payload.days_of_week, payload.start_time_pht, dur, vol, dose, payload.serial_number),
+                )
         else:
             cursor.execute(
                 """
-                UPDATE device_schedules
-                SET days_of_week = ?, start_time_pht = ?, duration_sec = ?,
-                    room_volume_m3 = ?, dosage_ml = ?, is_active = 1
-                WHERE serial_number = ?
+                INSERT INTO device_schedules (serial_number, days_of_week, start_time_pht, duration_sec, room_volume_m3, dosage_ml, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, 1)
                 """,
-                (payload.days_of_week, payload.start_time_pht, dur, vol, dose, payload.serial_number),
+                (payload.serial_number, payload.days_of_week, payload.start_time_pht, dur, vol, dose),
             )
-    else:
-        cursor.execute(
-            """
-            INSERT INTO device_schedules (serial_number, days_of_week, start_time_pht, duration_sec, room_volume_m3, dosage_ml, is_active)
-            VALUES (?, ?, ?, ?, ?, ?, 1)
-            """,
-            (payload.serial_number, payload.days_of_week, payload.start_time_pht, dur, vol, dose),
-        )
 
-    conn.commit()
-    conn.close()
-    return {"status": "SCHEDULE_SAVED", "serial_number": payload.serial_number}
+        conn.commit()
+        return {"status": "SCHEDULE_SAVED", "serial_number": payload.serial_number}
+    finally:
+        conn.close()
 
 # =========================================================
 # ROUTES: AUDIT LEDGER & MULTI-DEVICE OVERVIEW STATS
@@ -1659,6 +1922,8 @@ def get_audit_stats(station_id: Optional[str] = None, user: dict = Depends(requi
             "hocl_capacity_ml": reservoir["hocl_capacity_ml"],
             "hocl_low_threshold_ml": reservoir["hocl_low_threshold_ml"],
             "hocl_low_level": is_low,
+            "presence_detected": bool(base_tel.get("presence_detected", False)),
+            "presence_sensor_enabled": _get_station_presence_enabled(s_num),
         }
 
         is_defect = telemetry.get("is_defect", False)
@@ -1703,6 +1968,8 @@ def get_audit_stats(station_id: Optional[str] = None, user: dict = Depends(requi
         "hocl_capacity_ml": target_reservoir["hocl_capacity_ml"],
         "hocl_low_threshold_ml": target_reservoir["hocl_low_threshold_ml"],
         "hocl_low_level": target_is_low,
+        "presence_detected": bool(target_base_tel.get("presence_detected", False)),
+        "presence_sensor_enabled": _get_station_presence_enabled(target_station),
     }
 
     return {
@@ -1804,10 +2071,11 @@ def emergency_stop_cycle(
     if mqtt_client.is_connected():
         mqtt_client.publish(MQTT_CONTROL_TOPIC, json.dumps(abort_payload))
 
+    live_tel = live_station_telemetry.get(station_id, {})
     cycle_abort = CycleTelemetryInput(
         station_id=station_id,
-        ambient_temp_c=0.0,
-        relative_humidity_pct=0.0,
+        ambient_temp_c=float(live_tel.get("ambient_temp_c", 25.0)),
+        relative_humidity_pct=float(live_tel.get("relative_humidity_pct", 65.0)),
         flow_rate_ml_min=0.0,
         cycle_duration_sec=0.0,
         room_volume_m3=1.0,

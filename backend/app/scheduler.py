@@ -74,35 +74,38 @@ def run_schedule_tick(
             duration_sec = int(row["duration_sec"] or 30)
             room_volume_m3 = float(row["room_volume_m3"] or 1.0)
 
-            result = dispatch_fn(
-                station_id=serial,
-                duration_sec=duration_sec,
-                room_volume_m3=room_volume_m3,
-                trigger_type="SCHEDULED",
-                triggered_by="scheduler",
-            )
-            if result:
-                triggered_iso = current_utc.isoformat()
-                cursor.execute(
-                    """
-                    UPDATE device_schedules
-                    SET last_triggered_slot = ?, last_triggered_at = ?
-                    WHERE id = ?
-                    """,
-                    (current_slot, triggered_iso, row["id"]),
+            try:
+                result = dispatch_fn(
+                    station_id=serial,
+                    duration_sec=duration_sec,
+                    room_volume_m3=room_volume_m3,
+                    trigger_type="SCHEDULED",
+                    triggered_by="scheduler",
                 )
-                conn.commit()
-                dispatched_records.append(
-                    {
-                        "schedule_id": int(row["id"]),
-                        "station_id": serial,
-                        "duration_sec": duration_sec,
-                        "room_volume_m3": room_volume_m3,
-                        "slot_pht": current_slot,
-                        "triggered_at": triggered_iso,
-                        "status": result if isinstance(result, str) else "DISPATCHED",
-                    }
-                )
+                if result:
+                    triggered_iso = current_utc.isoformat()
+                    cursor.execute(
+                        """
+                        UPDATE device_schedules
+                        SET last_triggered_slot = ?, last_triggered_at = ?
+                        WHERE id = ?
+                        """,
+                        (current_slot, triggered_iso, row["id"]),
+                    )
+                    conn.commit()
+                    dispatched_records.append(
+                        {
+                            "schedule_id": int(row["id"]),
+                            "station_id": serial,
+                            "duration_sec": duration_sec,
+                            "room_volume_m3": room_volume_m3,
+                            "slot_pht": current_slot,
+                            "triggered_at": triggered_iso,
+                            "status": result if isinstance(result, str) else "DISPATCHED",
+                        }
+                    )
+            except Exception as exc:
+                print(f"[SCHEDULER WARN] Failed schedule #{row['id']} ({serial}): {exc}")
     finally:
         conn.close()
 
