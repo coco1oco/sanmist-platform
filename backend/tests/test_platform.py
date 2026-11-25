@@ -813,6 +813,117 @@ class SanMistRouteAuthTests(unittest.TestCase):
         self.assertIn("mqtt_broker_host", stats)
         self.assertIn("mqtt_broker_port", stats)
 
+    def test_hocl_low_status_updates_stats_and_blocks_manual_and_scheduled_triggers(self) -> None:
+        admin_headers = {"Authorization": f"Bearer {self._login_admin()}"}
+        orig_is_connected = main.mqtt_client.is_connected
+        orig_publish = main.mqtt_client.publish
+        orig_telemetry = dict(main.live_station_telemetry.get("MIST-BOH-01", {}))
+        published: list[tuple[str, str]] = []
+
+        class _FakeMsg:
+            def __init__(self, topic: str, payload: dict) -> None:
+                self.topic = topic
+                self.payload = json.dumps(payload).encode("utf-8")
+
+        class _FakePubInfo:
+            rc = main.mqtt.MQTT_ERR_SUCCESS
+
+        try:
+            main.mqtt_client.is_connected = lambda: True
+
+            def fake_publish(topic, payload):
+                published.append((topic, payload))
+                return _FakePubInfo()
+
+            main.mqtt_client.publish = fake_publish
+
+            device_key = main._get_device_auth_key("MIST-BOH-01")
+            main._on_mqtt_message(
+                None,
+                None,
+                _FakeMsg(
+                    "sanmist/devices/MIST-BOH-01/status",
+                    {
+                        "station_id": "MIST-BOH-01",
+                        "ambient_temp_c": 26.0,
+                        "relative_humidity_pct": 62.0,
+                        "flow_rate_ml_min": 30.0,
+                        "hocl_low_level": True,
+                        "cycle_in_progress": False,
+                        "auth_key": device_key,
+                    },
+                ),
+            )
+
+            stats_code, _, stats = call_api(
+                "GET",
+                "/api/v1/stats",
+                headers=admin_headers,
+                query_string="station_id=MIST-BOH-01",
+            )
+            self.assertEqual(stats_code, 200)
+            self.assertTrue(stats["live_telemetry"]["hocl_low_level"])
+            self.assertEqual(stats["fleet_health"]["low_hocl_count"], 1)
+            boh_entry = next(
+                d for d in stats["fleet_health"]["devices"] if d["serial_number"] == "MIST-BOH-01"
+            )
+            self.assertEqual(boh_entry["status"], "LOW_HOCL")
+
+            trig_code, _, trig_err = call_api(
+                "POST",
+                "/api/v1/trigger",
+                headers=admin_headers,
+                body={"station_id": "MIST-BOH-01", "duration_sec": 30, "room_volume_m3": 1.0},
+            )
+            self.assertEqual(trig_code, 409)
+            self.assertIn("depleted", trig_err["detail"].lower())
+            self.assertFalse(main._dispatch_scheduled_cycle("MIST-BOH-01", 30, 1.0))
+            self.assertEqual(len(published), 0)
+
+            main._on_mqtt_message(
+                None,
+                None,
+                _FakeMsg(
+                    "sanmist/devices/MIST-BOH-01/status",
+                    {
+                        "station_id": "MIST-BOH-01",
+                        "ambient_temp_c": 26.0,
+                        "relative_humidity_pct": 62.0,
+                        "flow_rate_ml_min": 30.0,
+                        "hocl_low_level": False,
+                        "cycle_in_progress": False,
+                        "auth_key": device_key,
+                    },
+                ),
+            )
+
+            restored_stats_code, _, restored_stats = call_api(
+                "GET",
+                "/api/v1/stats",
+                headers=admin_headers,
+                query_string="station_id=MIST-BOH-01",
+            )
+            self.assertEqual(restored_stats_code, 200)
+            self.assertFalse(restored_stats["live_telemetry"]["hocl_low_level"])
+            self.assertEqual(restored_stats["fleet_health"]["low_hocl_count"], 0)
+
+            ok_code, _, ok_data = call_api(
+                "POST",
+                "/api/v1/trigger",
+                headers=admin_headers,
+                body={"station_id": "MIST-BOH-01", "duration_sec": 30, "room_volume_m3": 1.0},
+            )
+            self.assertEqual(ok_code, 200)
+            self.assertEqual(ok_data["status"], "DISPATCHED")
+            self.assertEqual(len(published), 1)
+        finally:
+            main.mqtt_client.is_connected = orig_is_connected
+            main.mqtt_client.publish = orig_publish
+            if orig_telemetry:
+                main.live_station_telemetry["MIST-BOH-01"] = orig_telemetry
+            else:
+                main.live_station_telemetry.setdefault("MIST-BOH-01", {})["hocl_low_level"] = False
+
 
 class SanMistSchedulerAndExportTests(unittest.TestCase):
     def setUp(self) -> None:

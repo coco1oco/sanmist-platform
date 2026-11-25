@@ -9,7 +9,8 @@
     { "type": "wokwi-pushbutton", "id": "btn_start", "top": 220, "left": -80, "attrs": { "color": "green", "label": "Start" } },
     { "type": "wokwi-pushbutton", "id": "btn_estop", "top": 220, "left": -180, "attrs": { "color": "red", "label": "E-STOP" } },
     { "type": "wokwi-led", "id": "led_mist", "top": -80, "left": -80, "attrs": { "color": "purple", "label": "Atomizer Relay" } },
-    { "type": "wokwi-buzzer", "id": "buzzer", "top": -140, "left": -40, "attrs": { "volume": "0.5" } }
+    { "type": "wokwi-buzzer", "id": "buzzer", "top": -140, "left": -40, "attrs": { "volume": "0.5" } },
+    { "type": "wokwi-slide-switch", "id": "hocl_float", "top": 220, "left": 180, "attrs": {} }
   ],
   "connections": [
     [ "esp:TX", "$serialMonitor:RX", "", [] ],
@@ -27,7 +28,10 @@
     [ "esp:23", "led_mist:A", "purple", [ "v0" ] ],
     [ "esp:GND.2", "led_mist:C", "black", [ "v0" ] ],
     [ "esp:19", "buzzer:2", "orange", [ "v0" ] ],
-    [ "esp:GND.1", "buzzer:1", "black", [ "v0" ] ]
+    [ "esp:GND.1", "buzzer:1", "black", [ "v0" ] ],
+    [ "hocl_float:2", "esp:35", "gold", [ "v0" ] ],
+    [ "hocl_float:1", "esp:3V3", "red", [ "v0" ] ],
+    [ "hocl_float:3", "esp:GND.2", "black", [ "v0" ] ]
   ],
   "dependencies": {}
 }

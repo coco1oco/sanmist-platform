@@ -932,6 +932,10 @@ def _publish_start_command(
     return True, None
 
 
+def _is_station_hocl_low(station_id: str) -> bool:
+    return bool(live_station_telemetry.get(station_id, {}).get("hocl_low_level", False))
+
+
 def _dispatch_scheduled_cycle(
     station_id: str,
     duration_sec: int,
@@ -939,6 +943,9 @@ def _dispatch_scheduled_cycle(
     trigger_type: str = "SCHEDULED",
     triggered_by: str = "scheduler",
 ) -> bool:
+    if _is_station_hocl_low(station_id):
+        print(f"[SCHEDULER] Blocked scheduled cycle for {station_id}: HOCl disinfectant reservoir depleted.")
+        return False
     ok, err = _publish_start_command(
         station_id=station_id,
         duration_sec=duration_sec,
@@ -1451,6 +1458,11 @@ def trigger_cycle(req: CycleTriggerRequest, user: dict = Depends(require_auth)) 
     trigger_type = req.trigger_type or "MANUAL_WEB"
     station_id = req.station_id or "MIST-BOH-01"
     _ensure_station_access(user, station_id)
+    if _is_station_hocl_low(station_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="HOCl disinfectant reservoir depleted; refill before starting a cycle.",
+        )
 
     ok, err = _publish_start_command(
         station_id=station_id,

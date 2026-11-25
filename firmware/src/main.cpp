@@ -13,6 +13,7 @@
 #define PIN_ATOMIZER     23    // Matches diagram.json esp:23 -> led_mist:A
 #define PIN_BTN_START    18    // Matches diagram.json esp:18 -> btn_start (INPUT_PULLUP)
 #define PIN_BTN_ESTOP    5     // Matches diagram.json esp:5 -> btn_estop (INPUT_PULLUP)
+#define PIN_HOCL_FLOAT   35    // Matches diagram.json esp:35 -> hocl_float:2 (input-only, external SPDT 3V3/GND)
 
 #define DHTTYPE DHT22
 DHT dht(PIN_DHT, DHTTYPE);
@@ -84,6 +85,13 @@ unsigned long lastSensorPoll = 0;
 float lastReportedTemp = -999.0f;
 float lastReportedHum = -999.0f;
 float lastReportedFlow = -999.0f;
+bool lastReportedHoclLow = false;
+bool hasPublishedSensorStatus = false;
+bool statusSyncRequested = false;
+
+bool isHoclLow() {
+    return digitalRead(PIN_HOCL_FLOAT) == LOW;
+}
 
 void IRAM_ATTR handleEmergencyStop() {
     estop_active = true;
@@ -134,6 +142,11 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
 
     // 2. Handle Remote Trigger START (defer execution to loop() to avoid re-entrant MQTT callback)
     if (strcmp(command, "START") == 0) {
+        if (isHoclLow()) {
+            Serial.println("[INTERLOCK] Remote START rejected: HOCl disinfectant reservoir depleted!");
+            statusSyncRequested = true;
+            return;
+        }
         if (cycleInProgress || remoteTriggerRequested) {
             Serial.println("[WARN] Trigger ignored: Cycle already in progress.");
             return;
@@ -192,16 +205,27 @@ void pollAndPublishLiveSensors(bool forcePublish = false) {
 
     int potValue = analogRead(PIN_POT);
     float flow = map(potValue, 0, 4095, 10, 50); // mL/min proxy
+    bool hoclLow = isHoclLow();
 
     if (forcePublish ||
+        !hasPublishedSensorStatus ||
+        hoclLow != lastReportedHoclLow ||
         fabs(temp - lastReportedTemp) >= 0.2f ||
         fabs(hum - lastReportedHum) >= 0.5f ||
         fabs(flow - lastReportedFlow) >= 1.0f) {
         lastReportedTemp = temp;
         lastReportedHum = hum;
         lastReportedFlow = flow;
+        lastReportedHoclLow = hoclLow;
+        hasPublishedSensorStatus = true;
 
-        Serial.printf("[SENSOR] Live DHT22 & Flow -> Temp: %.1f C | Hum: %.1f %% | Flow: %.1f mL/min\n", temp, hum, flow);
+        Serial.printf(
+            "[SENSOR] Live DHT22 & Flow -> Temp: %.1f C | Hum: %.1f %% | Flow: %.1f mL/min | HOCl: %s\n",
+            temp,
+            hum,
+            flow,
+            hoclLow ? "LOW (DEPLETED)" : "OK"
+        );
 
         if (client.connected()) {
             JsonDocument doc;
@@ -209,10 +233,11 @@ void pollAndPublishLiveSensors(bool forcePublish = false) {
             doc["ambient_temp_c"] = temp;
             doc["relative_humidity_pct"] = hum;
             doc["flow_rate_ml_min"] = flow;
+            doc["hocl_low_level"] = hoclLow;
             doc["cycle_in_progress"] = cycleInProgress;
             doc["auth_key"] = device_auth_key;
 
-            char buffer[320];
+            char buffer[384];
             serializeJson(doc, buffer, sizeof(buffer));
             client.publish(status_topic, buffer);
         }
@@ -288,6 +313,16 @@ void publishTelemetry(float temp, float hum, float flow, float durationSec, floa
 }
 
 void runSanitizationCycle(unsigned long durationMs, float roomVol) {
+    if (isHoclLow()) {
+        Serial.println("[INTERLOCK] Cycle blocked: HOCl disinfectant reservoir depleted!");
+        tone(PIN_BUZZER, BUZZER_FREQ_HZ);
+        delay(250);
+        noTone(PIN_BUZZER);
+        digitalWrite(PIN_BUZZER, LOW);
+        statusSyncRequested = true;
+        return;
+    }
+
     cycleInProgress = true;
     estop_active = false;
     unsigned long cycleStart = millis();
@@ -302,6 +337,15 @@ void runSanitizationCycle(unsigned long durationMs, float roomVol) {
 
     unsigned long bzStart = millis();
     while (millis() - bzStart < 10000) {
+        if (isHoclLow()) {
+            noTone(PIN_BUZZER);
+            digitalWrite(PIN_BUZZER, LOW);
+            Serial.println("[INTERLOCK] Pre-cycle warning aborted: HOCl reservoir depleted!");
+            publishTelemetry(latestTemp, latestHum, 0.0f, (millis() - cycleStart) / 1000.0f, roomVol, false);
+            cycleInProgress = false;
+            statusSyncRequested = true;
+            return;
+        }
         // Check physical pin or ISR flag
         if (estop_active || digitalRead(PIN_BTN_ESTOP) == LOW) {
             estop_active = true;
@@ -327,6 +371,16 @@ void runSanitizationCycle(unsigned long durationMs, float roomVol) {
     int samples = 0;
 
     while (millis() - mistStart < durationMs) {
+        if (isHoclLow()) {
+            digitalWrite(PIN_ATOMIZER, LOW);
+            Serial.println("[INTERLOCK] Misting halted: HOCl reservoir depleted mid-cycle!");
+            readSanitizedEnvironment(latestTemp, latestHum);
+            float earlyDuration = (millis() - mistStart) / 1000.0f;
+            publishTelemetry(latestTemp, latestHum, 0.0f, earlyDuration, roomVol, false);
+            cycleInProgress = false;
+            statusSyncRequested = true;
+            return;
+        }
         // Poll emergency stop button
         if (estop_active || digitalRead(PIN_BTN_ESTOP) == LOW) {
             estop_active = true;
@@ -380,6 +434,7 @@ void setup() {
     pinMode(PIN_POT, INPUT);
     pinMode(PIN_BTN_START, INPUT_PULLUP);
     pinMode(PIN_BTN_ESTOP, INPUT_PULLUP);
+    pinMode(PIN_HOCL_FLOAT, INPUT);
 
     attachInterrupt(digitalPinToInterrupt(PIN_BTN_ESTOP), handleEmergencyStop, FALLING);
 
@@ -403,6 +458,10 @@ void loop() {
     }
 
     unsigned long now = millis();
+    if (statusSyncRequested || (hasPublishedSensorStatus && isHoclLow() != lastReportedHoclLow)) {
+        statusSyncRequested = false;
+        pollAndPublishLiveSensors(true);
+    }
     if (now - lastSensorPoll >= 2500) {
         lastSensorPoll = now;
         pollAndPublishLiveSensors();
