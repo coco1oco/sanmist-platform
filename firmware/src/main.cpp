@@ -21,6 +21,8 @@ DHT dht(PIN_DHT, DHTTYPE);
 // Manual cycle defaults (never overwritten by remote triggers)
 const unsigned long DEFAULT_MIST_DURATION_MS = 30000; // default 30s
 const float DEFAULT_ROOM_VOLUME_M3 = 1.0f;            // default 1.0 m^3
+const float HOCL_CAPACITY_ML = 500.0f;                // full disinfectant reservoir capacity
+const float HOCL_LOW_THRESHOLD_ML = 50.0f;            // 10% reserve safety interlock threshold
 
 // Remote trigger runtime parameters
 unsigned long remoteMistDurationMs = DEFAULT_MIST_DURATION_MS;
@@ -88,9 +90,16 @@ float lastReportedFlow = -999.0f;
 bool lastReportedHoclLow = false;
 bool hasPublishedSensorStatus = false;
 bool statusSyncRequested = false;
+float hoclRemainingMl = HOCL_CAPACITY_ML;
+bool lastPhysicalFloatLow = false;
+float lastReportedHoclMl = -1.0f;
+
+bool isPhysicalFloatLow() {
+    return digitalRead(PIN_HOCL_FLOAT) == LOW;
+}
 
 bool isHoclLow() {
-    return digitalRead(PIN_HOCL_FLOAT) == LOW;
+    return isPhysicalFloatLow() || (hoclRemainingMl <= HOCL_LOW_THRESHOLD_ML);
 }
 
 void IRAM_ATTR handleEmergencyStop() {
@@ -137,6 +146,17 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
         estop_active = true;
         digitalWrite(PIN_ATOMIZER, LOW);
         digitalWrite(PIN_BUZZER, LOW);
+        return;
+    }
+
+    // 1b. Handle Remote Reservoir Refill
+    if (strcmp(command, "REFILL") == 0) {
+        float targetMl = doc["hocl_remaining_ml"] | HOCL_CAPACITY_ML;
+        if (targetMl < 0.0f) targetMl = 0.0f;
+        if (targetMl > HOCL_CAPACITY_ML) targetMl = HOCL_CAPACITY_ML;
+        hoclRemainingMl = targetMl;
+        Serial.printf("[REFILL] Reservoir refilled to %.1f / %.1f mL\n", hoclRemainingMl, HOCL_CAPACITY_ML);
+        statusSyncRequested = true;
         return;
     }
 
@@ -217,6 +237,7 @@ void pollAndPublishLiveSensors(bool forcePublish = false) {
     if (forcePublish ||
         !hasPublishedSensorStatus ||
         hoclLow != lastReportedHoclLow ||
+        fabs(hoclRemainingMl - lastReportedHoclMl) >= 1.0f ||
         fabs(temp - lastReportedTemp) >= 0.2f ||
         fabs(hum - lastReportedHum) >= 0.5f ||
         fabs(flow - lastReportedFlow) >= 1.0f) {
@@ -224,13 +245,16 @@ void pollAndPublishLiveSensors(bool forcePublish = false) {
         lastReportedHum = hum;
         lastReportedFlow = flow;
         lastReportedHoclLow = hoclLow;
+        lastReportedHoclMl = hoclRemainingMl;
         hasPublishedSensorStatus = true;
 
         Serial.printf(
-            "[SENSOR] Live DHT22 & Flow -> Temp: %.1f C | Hum: %.1f %% | Flow: %.1f mL/min | HOCl: %s\n",
+            "[SENSOR] Live DHT22 & Flow -> Temp: %.1f C | Hum: %.1f %% | Flow: %.1f mL/min | HOCl: %.1f/%.0f mL (%s)\n",
             temp,
             hum,
             flow,
+            hoclRemainingMl,
+            HOCL_CAPACITY_ML,
             hoclLow ? "LOW (DEPLETED)" : "OK"
         );
 
@@ -241,6 +265,8 @@ void pollAndPublishLiveSensors(bool forcePublish = false) {
             doc["relative_humidity_pct"] = hum;
             doc["flow_rate_ml_min"] = flow;
             doc["hocl_low_level"] = hoclLow;
+            doc["hocl_remaining_ml"] = roundf(hoclRemainingMl * 10.0f) / 10.0f;
+            doc["hocl_capacity_ml"] = HOCL_CAPACITY_ML;
             doc["cycle_in_progress"] = cycleInProgress;
             doc["auth_key"] = device_auth_key;
 
@@ -322,9 +348,11 @@ void publishTelemetry(float temp, float hum, float flow, float durationSec, floa
     doc["room_volume_m3"] = roomVol;
     doc["delivery_confirmed"] = (flow > 5.0f && !estop);
     doc["estop_triggered"] = estop;
+    doc["hocl_remaining_ml"] = roundf(hoclRemainingMl * 10.0f) / 10.0f;
+    doc["hocl_capacity_ml"] = HOCL_CAPACITY_ML;
     doc["auth_key"] = device_auth_key;
 
-    char buffer[384];
+    char buffer[448];
     serializeJson(doc, buffer, sizeof(buffer));
 
     bool sent = client.publish(telemetry_topic, buffer);
@@ -392,6 +420,7 @@ void runSanitizationCycle(unsigned long durationMs, float roomVol) {
     digitalWrite(PIN_ATOMIZER, HIGH);
 
     unsigned long mistStart = millis();
+    unsigned long lastFlowTickMs = mistStart;
     float totalFlow = 0.0f;
     int samples = 0;
 
@@ -418,15 +447,21 @@ void runSanitizationCycle(unsigned long durationMs, float roomVol) {
             return;
         }
 
-        // Read atomizer flow proxy via potentiometer
+        // Read atomizer flow proxy via potentiometer and subtract dispensed mL
+        unsigned long nowMs = millis();
+        float dtSec = (nowMs - lastFlowTickMs) / 1000.0f;
+        lastFlowTickMs = nowMs;
+
         int potValue = analogRead(PIN_POT);
         float currentFlow = (float)map(potValue, 0, 4095, 10, 50); // mL/min proxy
+        hoclRemainingMl = max(0.0f, hoclRemainingMl - (currentFlow * (dtSec / 60.0f)));
         totalFlow += currentFlow;
         samples++;
 
-        // Sample DHT22 environment sensor periodically (~2 sec cadence)
+        // Sample DHT22 environment sensor and stream live reservoir level (~2 sec cadence)
         if (samples % 20 == 0) {
             readSanitizedEnvironment(latestTemp, latestHum);
+            pollAndPublishLiveSensors(true);
         }
 
         // Keep MQTT connection alive to prevent broker timeout
@@ -448,6 +483,7 @@ void runSanitizationCycle(unsigned long durationMs, float roomVol) {
     lastReportedFlow = avgFlow;
 
     publishTelemetry(latestTemp, latestHum, avgFlow, actualDurationSec, roomVol, false);
+    statusSyncRequested = true;
 }
 
 void setup() {
@@ -460,6 +496,7 @@ void setup() {
     pinMode(PIN_BTN_START, INPUT_PULLUP);
     pinMode(PIN_BTN_ESTOP, INPUT_PULLUP);
     pinMode(PIN_HOCL_FLOAT, INPUT);
+    lastPhysicalFloatLow = isPhysicalFloatLow();
 
     attachInterrupt(digitalPinToInterrupt(PIN_BTN_ESTOP), handleEmergencyStop, FALLING);
 
@@ -483,6 +520,14 @@ void loop() {
     }
 
     unsigned long now = millis();
+    bool physLow = isPhysicalFloatLow();
+    if (lastPhysicalFloatLow && !physLow) {
+        hoclRemainingMl = HOCL_CAPACITY_ML;
+        Serial.printf("[REFILL] Float switch restored -> reservoir reset to %.1f mL\n", hoclRemainingMl);
+        statusSyncRequested = true;
+    }
+    lastPhysicalFloatLow = physLow;
+
     if (statusSyncRequested || (hasPublishedSensorStatus && isHoclLow() != lastReportedHoclLow)) {
         statusSyncRequested = false;
         pollAndPublishLiveSensors(true);

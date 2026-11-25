@@ -1103,8 +1103,12 @@
                   <span class="tiny-label">HOCl Level</span>
                   <span id="hocl-badge" class="chip mono" style="padding:2px 10px;font-size:10px;">NORMAL</span>
                 </div>
-                <div id="hocl-level-text" class="mono big" style="font-size:22px;margin-top:14px;">OK (Full)</div>
-                <span class="mono src">Level Float (GPIO 35)</span>
+                <div id="hocl-level-text" class="mono big" style="font-size:22px;margin-top:14px;">500 mL</div>
+                <div class="progress" style="margin-top:8px;"><div id="hocl-level-bar" style="width:100%;background:var(--tone);"></div></div>
+                <div class="row-between" style="margin-top:8px;gap:8px;">
+                  <span id="hocl-level-sub" class="mono src">500 / 500 mL (100%) · GPIO 35</span>
+                  <button id="btn-refill-hocl" type="button" class="btn-ghost" style="padding:3px 10px;font-size:10px;" onclick="refillHoclReservoir()">Refill</button>
+                </div>
               </div>
             </div>
             <div class="card">
@@ -2415,24 +2419,59 @@
 
     function updateLiveSensorStrip(telemetry) {
       if (!telemetry) return;
+      const cap = Number(telemetry.hocl_capacity_ml) > 0 ? Number(telemetry.hocl_capacity_ml) : 500;
+      const rem = telemetry.hocl_remaining_ml !== undefined && telemetry.hocl_remaining_ml !== null
+        ? Math.max(0, Math.min(cap, Number(telemetry.hocl_remaining_ml)))
+        : cap;
+      const thresh = Number(telemetry.hocl_low_threshold_ml) > 0 ? Number(telemetry.hocl_low_threshold_ml) : 50;
+      const low = Boolean(telemetry.hocl_low_level ?? false) || rem <= thresh;
       liveSensorState = {
         temp: Number(telemetry.ambient_temp_c) || 25.0,
         hum: Number(telemetry.relative_humidity_pct) || 65.0,
         flow: Number(telemetry.flow_rate_ml_min) || 30.0,
-        hoclLow: Boolean(telemetry.hocl_low_level ?? false)
+        hoclLow: low,
+        hoclRemainingMl: rem,
+        hoclCapacityMl: cap
       };
       if ($("sensor-temp")) $("sensor-temp").textContent = `${liveSensorState.temp.toFixed(1)} °C`;
       if ($("sensor-hum")) $("sensor-hum").textContent = `${liveSensorState.hum.toFixed(1)} %`;
       if ($("sensor-flow")) $("sensor-flow").textContent = `${liveSensorState.flow.toFixed(1)} mL/min`;
 
-      const low = liveSensorState.hoclLow;
+      const pct = Math.max(0, Math.min(100, (rem / cap) * 100));
       const badge = $("hocl-badge");
-      setTone($("hocl-card"), low ? "fail" : "pass");
-      if (badge) badge.textContent = low ? "DEPLETED" : "NORMAL";
-      if ($("hocl-level-text")) $("hocl-level-text").textContent = low ? "LOW (Refill)" : "OK (Full)";
+      setTone($("hocl-card"), low ? "fail" : pct <= 25 ? "warn" : "pass");
+      if (badge) badge.textContent = low ? "DEPLETED" : pct <= 25 ? "LOW SOON" : "NORMAL";
+      if ($("hocl-level-text")) $("hocl-level-text").textContent = low ? `${rem.toFixed(0)} mL (Low)` : `${rem.toFixed(0)} mL`;
+      if ($("hocl-level-bar")) $("hocl-level-bar").style.width = `${pct.toFixed(0)}%`;
+      if ($("hocl-level-sub")) $("hocl-level-sub").textContent = `${rem.toFixed(0)} / ${cap.toFixed(0)} mL (${pct.toFixed(0)}%) · GPIO 35`;
       $("hocl-low-alert")?.classList.toggle("hidden", !low);
       updateSeiEstimatePreview();
       updateScheduleSummary();
+    }
+
+    async function refillHoclReservoir() {
+      if (!activeStation) {
+        toast("Select or register a station first.");
+        return;
+      }
+      const btn = $("btn-refill-hocl");
+      if (btn) btn.disabled = true;
+      try {
+        const res = await authFetch(`/api/v1/devices/${encodeURIComponent(activeStation)}/refill`, {
+          method: "POST"
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || "Failed to refill reservoir");
+        }
+        const data = await res.json();
+        toast(`Refilled ${activeStation} reservoir to ${Number(data.hocl_remaining_ml).toFixed(0)} mL.`);
+        await refreshDashboard();
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        if (btn) btn.disabled = false;
+      }
     }
 
     function classify(r) {

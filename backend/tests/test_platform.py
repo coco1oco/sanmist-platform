@@ -924,6 +924,141 @@ class SanMistRouteAuthTests(unittest.TestCase):
             else:
                 main.live_station_telemetry.setdefault("MIST-BOH-01", {})["hocl_low_level"] = False
 
+    def test_hocl_reservoir_subtracts_per_cycle_trips_low_and_refills(self) -> None:
+        admin_headers = {"Authorization": f"Bearer {self._login_admin()}"}
+        orig_is_connected = main.mqtt_client.is_connected
+        orig_publish = main.mqtt_client.publish
+        orig_telemetry = dict(main.live_station_telemetry.get("MIST-BOH-01", {}))
+        published: list[tuple[str, str]] = []
+
+        class _FakePubInfo:
+            rc = main.mqtt.MQTT_ERR_SUCCESS
+
+        try:
+            main.mqtt_client.is_connected = lambda: True
+
+            def fake_publish(topic, payload):
+                published.append((topic, payload))
+                return _FakePubInfo()
+
+            main.mqtt_client.publish = fake_publish
+
+            # 1. Initial stats start at full 500.0 mL reservoir
+            init_code, _, init_stats = call_api(
+                "GET", "/api/v1/stats", headers=admin_headers, query_string="station_id=MIST-BOH-01"
+            )
+            self.assertEqual(init_code, 200)
+            self.assertEqual(init_stats["live_telemetry"]["hocl_remaining_ml"], 500.0)
+            self.assertEqual(init_stats["live_telemetry"]["hocl_capacity_ml"], 500.0)
+            self.assertFalse(init_stats["live_telemetry"]["hocl_low_level"])
+
+            # 2. A 30s cycle at 30 mL/min consumes 15.0 mL -> 485.0 mL remaining in stats & DB
+            device_key = main._get_device_auth_key("MIST-BOH-01")
+            ev1_code, _, ev1 = call_api(
+                "POST",
+                "/api/v1/telemetry/evaluate",
+                headers={"X-Device-Key": device_key},
+                body={
+                    "station_id": "MIST-BOH-01",
+                    "ambient_temp_c": 25.0,
+                    "relative_humidity_pct": 65.0,
+                    "flow_rate_ml_min": 30.0,
+                    "cycle_duration_sec": 30.0,
+                    "room_volume_m3": 1.0,
+                },
+            )
+            self.assertEqual(ev1_code, 200)
+            self.assertEqual(ev1["hocl_consumed_ml"], 15.0)
+            self.assertEqual(ev1["hocl_remaining_ml"], 485.0)
+
+            s1_code, _, s1 = call_api(
+                "GET", "/api/v1/stats", headers=admin_headers, query_string="station_id=MIST-BOH-01"
+            )
+            self.assertEqual(s1_code, 200)
+            self.assertEqual(s1["live_telemetry"]["hocl_remaining_ml"], 485.0)
+            self.assertFalse(s1["live_telemetry"]["hocl_low_level"])
+
+            conn = sqlite3.connect(main.DB_PATH)
+            try:
+                db_rem = conn.execute(
+                    "SELECT hocl_remaining_ml FROM devices WHERE serial_number = 'MIST-BOH-01'"
+                ).fetchone()[0]
+                self.assertEqual(db_rem, 485.0)
+            finally:
+                conn.close()
+
+            # 3. Dropping below 50 mL threshold sets hocl_low_level=True and blocks triggers (409)
+            ev2_code, _, ev2 = call_api(
+                "POST",
+                "/api/v1/telemetry/evaluate",
+                headers={"X-Device-Key": device_key},
+                body={
+                    "station_id": "MIST-BOH-01",
+                    "ambient_temp_c": 25.0,
+                    "relative_humidity_pct": 65.0,
+                    "flow_rate_ml_min": 30.0,
+                    "cycle_duration_sec": 30.0,
+                    "room_volume_m3": 1.0,
+                    "hocl_remaining_ml": 40.0,
+                    "hocl_capacity_ml": 500.0,
+                },
+            )
+            self.assertEqual(ev2_code, 200)
+            self.assertEqual(ev2["hocl_remaining_ml"], 40.0)
+
+            s2_code, _, s2 = call_api(
+                "GET", "/api/v1/stats", headers=admin_headers, query_string="station_id=MIST-BOH-01"
+            )
+            self.assertEqual(s2_code, 200)
+            self.assertTrue(s2["live_telemetry"]["hocl_low_level"])
+            self.assertEqual(s2["fleet_health"]["low_hocl_count"], 1)
+
+            blocked_code, _, _ = call_api(
+                "POST",
+                "/api/v1/trigger",
+                headers=admin_headers,
+                body={"station_id": "MIST-BOH-01", "duration_sec": 30, "room_volume_m3": 1.0},
+            )
+            self.assertEqual(blocked_code, 409)
+            self.assertEqual(len(published), 0)
+
+            # 4. Refill endpoint resets reservoir to 500.0 mL, notifies ESP32 via MQTT, and unlocks trigger
+            refill_code, _, refill_data = call_api(
+                "POST", "/api/v1/devices/MIST-BOH-01/refill", headers=admin_headers
+            )
+            self.assertEqual(refill_code, 200)
+            self.assertEqual(refill_data["status"], "REFILLED")
+            self.assertEqual(refill_data["hocl_remaining_ml"], 500.0)
+            self.assertEqual(len(published), 1)
+            refill_msg = json.loads(published[0][1])
+            self.assertEqual(refill_msg["command"], "REFILL")
+            self.assertEqual(refill_msg["hocl_remaining_ml"], 500.0)
+            self.assertTrue(main._verify_mqtt_auth(refill_msg))
+
+            s3_code, _, s3 = call_api(
+                "GET", "/api/v1/stats", headers=admin_headers, query_string="station_id=MIST-BOH-01"
+            )
+            self.assertEqual(s3_code, 200)
+            self.assertEqual(s3["live_telemetry"]["hocl_remaining_ml"], 500.0)
+            self.assertFalse(s3["live_telemetry"]["hocl_low_level"])
+            self.assertEqual(s3["fleet_health"]["low_hocl_count"], 0)
+
+            ok_code, _, ok_data = call_api(
+                "POST",
+                "/api/v1/trigger",
+                headers=admin_headers,
+                body={"station_id": "MIST-BOH-01", "duration_sec": 30, "room_volume_m3": 1.0},
+            )
+            self.assertEqual(ok_code, 200)
+            self.assertEqual(ok_data["status"], "DISPATCHED")
+        finally:
+            main.mqtt_client.is_connected = orig_is_connected
+            main.mqtt_client.publish = orig_publish
+            if orig_telemetry:
+                main.live_station_telemetry["MIST-BOH-01"] = orig_telemetry
+            else:
+                main.live_station_telemetry.setdefault("MIST-BOH-01", {})["hocl_low_level"] = False
+
 
 class SanMistSchedulerAndExportTests(unittest.TestCase):
     def setUp(self) -> None:

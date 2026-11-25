@@ -60,6 +60,8 @@ MQTT_STATUS_TOPIC = "sanmist/devices/+/status"
 MQTT_CONTROL_TOPIC = "sanmist/control/trigger"
 SESSION_TTL_HOURS = int(os.getenv("SANMIST_SESSION_TTL_HOURS", "24"))
 GENESIS_HASH = "0" * 64
+DEFAULT_HOCL_CAPACITY_ML = 500.0
+DEFAULT_HOCL_LOW_THRESHOLD_ML = 50.0
 
 # =========================================================
 # 2. PRE-PROVISIONED DEVICES REGISTRY (WHITELIST)
@@ -95,6 +97,10 @@ live_station_telemetry: dict[str, dict] = {
         "relative_humidity_pct": 65.0,
         "flow_rate_ml_min": 30.0,
         "hocl_low_level": False,
+        "hocl_float_low": False,
+        "hocl_remaining_ml": DEFAULT_HOCL_CAPACITY_ML,
+        "hocl_capacity_ml": DEFAULT_HOCL_CAPACITY_ML,
+        "hocl_low_threshold_ml": DEFAULT_HOCL_LOW_THRESHOLD_ML,
         "is_defect": False,
         "cycle_in_progress": False,
         "updated_at": datetime.now(timezone.utc).isoformat()
@@ -394,9 +400,21 @@ def init_db() -> None:
             model_name TEXT NOT NULL DEFAULT 'MistSan Standard',
             auth_key TEXT NOT NULL DEFAULT 'sanmist-edge-key-2026',
             is_claimed INTEGER NOT NULL DEFAULT 0,
+            hocl_capacity_ml REAL NOT NULL DEFAULT 500.0,
+            hocl_remaining_ml REAL NOT NULL DEFAULT 500.0,
+            hocl_low_threshold_ml REAL NOT NULL DEFAULT 50.0,
             registered_at TEXT NOT NULL
         )
     """)
+
+    cursor.execute("PRAGMA table_info(devices)")
+    dev_columns = {col[1] for col in cursor.fetchall()}
+    if "hocl_capacity_ml" not in dev_columns:
+        cursor.execute("ALTER TABLE devices ADD COLUMN hocl_capacity_ml REAL NOT NULL DEFAULT 500.0")
+    if "hocl_remaining_ml" not in dev_columns:
+        cursor.execute("ALTER TABLE devices ADD COLUMN hocl_remaining_ml REAL NOT NULL DEFAULT 500.0")
+    if "hocl_low_threshold_ml" not in dev_columns:
+        cursor.execute("ALTER TABLE devices ADD COLUMN hocl_low_threshold_ml REAL NOT NULL DEFAULT 50.0")
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS user_devices (
@@ -488,6 +506,8 @@ class CycleTelemetryInput(BaseModel):
     delivery_confirmed: bool = Field(default=True)
     estop_triggered: bool = Field(default=False)
     trigger_type: Optional[str] = Field(default="MANUAL_WEB")
+    hocl_remaining_ml: Optional[float] = Field(default=None, ge=0.0, le=10000.0)
+    hocl_capacity_ml: Optional[float] = Field(default=None, gt=0.0, le=10000.0)
     auth_key: Optional[str] = Field(default=None)
     signature: Optional[str] = Field(default=None)
 
@@ -776,6 +796,35 @@ def evaluate_telemetry_cycle(cycle: CycleTelemetryInput, deduplicate_window_sec:
     finally:
         conn.close()
 
+    consumed_ml = (
+        0.0
+        if cycle.estop_triggered
+        else round((cycle.flow_rate_ml_min * (cycle.cycle_duration_sec / 60.0)), 2)
+    )
+    reservoir = _update_station_reservoir(
+        cycle.station_id,
+        remaining_ml=cycle.hocl_remaining_ml,
+        consumed_ml=consumed_ml,
+        capacity_ml=cycle.hocl_capacity_ml,
+    )
+    prev_tel = live_station_telemetry.get(cycle.station_id, {})
+    float_low = bool(prev_tel.get("hocl_float_low", False))
+    effective_low = float_low or (reservoir["hocl_remaining_ml"] <= reservoir["hocl_low_threshold_ml"])
+    live_station_telemetry[cycle.station_id] = {
+        "station_id": cycle.station_id,
+        "ambient_temp_c": float(prev_tel.get("ambient_temp_c", cycle.ambient_temp_c)),
+        "relative_humidity_pct": float(prev_tel.get("relative_humidity_pct", cycle.relative_humidity_pct)),
+        "flow_rate_ml_min": float(prev_tel.get("flow_rate_ml_min", cycle.flow_rate_ml_min)),
+        "hocl_low_level": effective_low,
+        "hocl_float_low": float_low,
+        "hocl_remaining_ml": reservoir["hocl_remaining_ml"],
+        "hocl_capacity_ml": reservoir["hocl_capacity_ml"],
+        "hocl_low_threshold_ml": reservoir["hocl_low_threshold_ml"],
+        "is_defect": bool(prev_tel.get("is_defect", False)),
+        "cycle_in_progress": False,
+        "updated_at": recorded_at,
+    }
+
     return {
         "duplicate": False,
         "id": inserted_id,
@@ -789,6 +838,9 @@ def evaluate_telemetry_cycle(cycle: CycleTelemetryInput, deduplicate_window_sec:
         "delivery_confirmed": cycle.delivery_confirmed,
         "ml_confidence": ml_confidence,
         "estop_triggered": cycle.estop_triggered,
+        "hocl_consumed_ml": consumed_ml,
+        "hocl_remaining_ml": reservoir["hocl_remaining_ml"],
+        "hocl_capacity_ml": reservoir["hocl_capacity_ml"],
         "prev_hash": prev_hash,
         "record_hash": record_hash,
     }
@@ -878,12 +930,29 @@ def _on_mqtt_message(client, userdata, msg):
         station_id = str(data_dict.get("station_id") or "MIST-BOH-01")
 
         if topic_str.endswith("/status"):
+            reported_low = bool(data_dict.get("hocl_low_level", False))
+            raw_remaining = data_dict.get("hocl_remaining_ml")
+            raw_capacity = data_dict.get("hocl_capacity_ml")
+            if raw_remaining is not None:
+                reservoir = _update_station_reservoir(
+                    station_id,
+                    remaining_ml=float(raw_remaining),
+                    capacity_ml=float(raw_capacity) if raw_capacity is not None else None,
+                )
+            else:
+                reservoir = _get_station_reservoir(station_id)
+            effective_low = reported_low or (reservoir["hocl_remaining_ml"] <= reservoir["hocl_low_threshold_ml"])
+            float_low = bool(reported_low and reservoir["hocl_remaining_ml"] > reservoir["hocl_low_threshold_ml"])
             live_station_telemetry[station_id] = {
                 "station_id": station_id,
                 "ambient_temp_c": float(data_dict.get("ambient_temp_c", 25.0)),
                 "relative_humidity_pct": float(data_dict.get("relative_humidity_pct", 65.0)),
                 "flow_rate_ml_min": float(data_dict.get("flow_rate_ml_min", 30.0)),
-                "hocl_low_level": bool(data_dict.get("hocl_low_level", False)),
+                "hocl_low_level": effective_low,
+                "hocl_float_low": float_low,
+                "hocl_remaining_ml": reservoir["hocl_remaining_ml"],
+                "hocl_capacity_ml": reservoir["hocl_capacity_ml"],
+                "hocl_low_threshold_ml": reservoir["hocl_low_threshold_ml"],
                 "is_defect": bool(data_dict.get("is_defect", False)),
                 "cycle_in_progress": bool(data_dict.get("cycle_in_progress", False)),
                 "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -932,8 +1001,89 @@ def _publish_start_command(
     return True, None
 
 
+def _get_station_reservoir(station_id: str) -> dict:
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT hocl_capacity_ml, hocl_remaining_ml, hocl_low_threshold_ml FROM devices WHERE serial_number = ?",
+            (station_id,),
+        )
+        row = cursor.fetchone()
+    finally:
+        conn.close()
+
+    if row is None:
+        return {
+            "hocl_capacity_ml": DEFAULT_HOCL_CAPACITY_ML,
+            "hocl_remaining_ml": DEFAULT_HOCL_CAPACITY_ML,
+            "hocl_low_threshold_ml": DEFAULT_HOCL_LOW_THRESHOLD_ML,
+        }
+    return {
+        "hocl_capacity_ml": round(float(row["hocl_capacity_ml"]), 2),
+        "hocl_remaining_ml": round(float(row["hocl_remaining_ml"]), 2),
+        "hocl_low_threshold_ml": round(float(row["hocl_low_threshold_ml"]), 2),
+    }
+
+
+def _update_station_reservoir(
+    station_id: str,
+    remaining_ml: Optional[float] = None,
+    consumed_ml: float = 0.0,
+    capacity_ml: Optional[float] = None,
+) -> dict:
+    conn = get_db_connection(isolation_level=None)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        cursor.execute(
+            "SELECT hocl_capacity_ml, hocl_remaining_ml, hocl_low_threshold_ml FROM devices WHERE serial_number = ?",
+            (station_id,),
+        )
+        row = cursor.fetchone()
+        if row is not None:
+            cap = float(capacity_ml) if capacity_ml is not None else float(row["hocl_capacity_ml"])
+            thresh = float(row["hocl_low_threshold_ml"])
+            cur_rem = float(row["hocl_remaining_ml"])
+        else:
+            cap = float(capacity_ml) if capacity_ml is not None else DEFAULT_HOCL_CAPACITY_ML
+            thresh = DEFAULT_HOCL_LOW_THRESHOLD_ML
+            cur_rem = cap
+
+        if remaining_ml is not None:
+            new_rem = float(remaining_ml)
+        else:
+            new_rem = cur_rem - max(0.0, float(consumed_ml))
+        new_rem = round(max(0.0, min(cap, new_rem)), 2)
+        cap = round(cap, 2)
+        thresh = round(thresh, 2)
+
+        if row is not None:
+            cursor.execute(
+                "UPDATE devices SET hocl_capacity_ml = ?, hocl_remaining_ml = ? WHERE serial_number = ?",
+                (cap, new_rem, station_id),
+            )
+        cursor.execute("COMMIT")
+        return {
+            "hocl_capacity_ml": cap,
+            "hocl_remaining_ml": new_rem,
+            "hocl_low_threshold_ml": thresh,
+        }
+    except Exception:
+        try:
+            cursor.execute("ROLLBACK")
+        except Exception:
+            pass
+        raise
+    finally:
+        conn.close()
+
+
 def _is_station_hocl_low(station_id: str) -> bool:
-    return bool(live_station_telemetry.get(station_id, {}).get("hocl_low_level", False))
+    if bool(live_station_telemetry.get(station_id, {}).get("hocl_low_level", False)):
+        return True
+    reservoir = _get_station_reservoir(station_id)
+    return reservoir["hocl_remaining_ml"] <= reservoir["hocl_low_threshold_ml"]
 
 
 def _dispatch_scheduled_cycle(
@@ -1167,18 +1317,73 @@ def claim_device(payload: ClaimDevicePayload, user: dict = Depends(require_auth)
 
     # Initialize live telemetry slot if not yet populated
     if serial not in live_station_telemetry:
+        reservoir = _get_station_reservoir(serial)
         live_station_telemetry[serial] = {
             "station_id": serial,
             "ambient_temp_c": 25.0,
             "relative_humidity_pct": 65.0,
             "flow_rate_ml_min": 30.0,
-            "hocl_low_level": False,
+            "hocl_low_level": reservoir["hocl_remaining_ml"] <= reservoir["hocl_low_threshold_ml"],
+            "hocl_float_low": False,
+            "hocl_remaining_ml": reservoir["hocl_remaining_ml"],
+            "hocl_capacity_ml": reservoir["hocl_capacity_ml"],
+            "hocl_low_threshold_ml": reservoir["hocl_low_threshold_ml"],
             "is_defect": False,
             "cycle_in_progress": False,
             "updated_at": datetime.now(timezone.utc).isoformat()
         }
 
     return {"status": "SUCCESS", "serial_number": serial, "nickname": nickname}
+
+@app.post("/api/v1/devices/{serial_number}/refill")
+def refill_device_reservoir(serial_number: str, user: dict = Depends(require_auth)):
+    _ensure_station_access(user, serial_number)
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT serial_number FROM devices WHERE serial_number = ?", (serial_number,))
+        if cursor.fetchone() is None:
+            raise HTTPException(status_code=404, detail="Device not found.")
+    finally:
+        conn.close()
+
+    current = _get_station_reservoir(serial_number)
+    updated = _update_station_reservoir(serial_number, remaining_ml=current["hocl_capacity_ml"])
+
+    prev = live_station_telemetry.get(serial_number, {})
+    live_station_telemetry[serial_number] = {
+        "station_id": serial_number,
+        "ambient_temp_c": float(prev.get("ambient_temp_c", 25.0)),
+        "relative_humidity_pct": float(prev.get("relative_humidity_pct", 65.0)),
+        "flow_rate_ml_min": float(prev.get("flow_rate_ml_min", 30.0)),
+        "hocl_low_level": False,
+        "hocl_float_low": False,
+        "hocl_remaining_ml": updated["hocl_remaining_ml"],
+        "hocl_capacity_ml": updated["hocl_capacity_ml"],
+        "hocl_low_threshold_ml": updated["hocl_low_threshold_ml"],
+        "is_defect": bool(prev.get("is_defect", False)),
+        "cycle_in_progress": bool(prev.get("cycle_in_progress", False)),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    if mqtt_client.is_connected():
+        device_key = _get_device_auth_key(serial_number)
+        refill_cmd = {
+            "command": "REFILL",
+            "station_id": serial_number,
+            "hocl_remaining_ml": updated["hocl_capacity_ml"],
+            "triggered_by": user["username"],
+            "auth_key": device_key,
+        }
+        refill_cmd["signature"] = _compute_mqtt_signature(refill_cmd, device_key)
+        mqtt_client.publish(MQTT_CONTROL_TOPIC, json.dumps(refill_cmd))
+
+    return {
+        "status": "REFILLED",
+        "station_id": serial_number,
+        "hocl_remaining_ml": updated["hocl_remaining_ml"],
+        "hocl_capacity_ml": updated["hocl_capacity_ml"],
+    }
 
 @app.delete("/api/v1/devices/{serial_number}")
 def remove_device(serial_number: str, user: dict = Depends(require_auth)):
@@ -1378,16 +1583,28 @@ def get_audit_stats(station_id: Optional[str] = None, user: dict = Depends(requi
 
     for dev in claimed:
         s_num = dev["serial_number"]
-        telemetry = live_station_telemetry.get(s_num, {
+        reservoir = _get_station_reservoir(s_num)
+        base_tel = live_station_telemetry.get(s_num, {
+            "station_id": s_num,
             "ambient_temp_c": 25.0,
             "relative_humidity_pct": 65.0,
             "flow_rate_ml_min": 30.0,
             "hocl_low_level": False,
-            "is_defect": False
+            "is_defect": False,
         })
+        float_low = bool(base_tel.get("hocl_float_low", False))
+        is_low = float_low or bool(base_tel.get("hocl_low_level", False)) or (
+            reservoir["hocl_remaining_ml"] <= reservoir["hocl_low_threshold_ml"]
+        )
+        telemetry = {
+            **base_tel,
+            "hocl_remaining_ml": reservoir["hocl_remaining_ml"],
+            "hocl_capacity_ml": reservoir["hocl_capacity_ml"],
+            "hocl_low_threshold_ml": reservoir["hocl_low_threshold_ml"],
+            "hocl_low_level": is_low,
+        }
 
         is_defect = telemetry.get("is_defect", False)
-        is_low = telemetry.get("hocl_low_level", False)
 
         if is_defect:
             dev_status = "DEFECT"
@@ -1410,6 +1627,26 @@ def get_audit_stats(station_id: Optional[str] = None, user: dict = Depends(requi
     pass_count = int(row["pass_count"])
     pass_rate_pct = round((pass_count / total_cycles) * 100.0, 1) if total_cycles > 0 else 0.0
     target_station = (station_id or "").strip() or "MIST-BOH-01"
+    target_reservoir = _get_station_reservoir(target_station)
+    target_base_tel = live_station_telemetry.get(target_station, {
+        "station_id": target_station,
+        "ambient_temp_c": 25.0,
+        "relative_humidity_pct": 65.0,
+        "flow_rate_ml_min": 30.0,
+        "hocl_low_level": False,
+    })
+    target_is_low = (
+        bool(target_base_tel.get("hocl_float_low", False))
+        or bool(target_base_tel.get("hocl_low_level", False))
+        or (target_reservoir["hocl_remaining_ml"] <= target_reservoir["hocl_low_threshold_ml"])
+    )
+    target_live_telemetry = {
+        **target_base_tel,
+        "hocl_remaining_ml": target_reservoir["hocl_remaining_ml"],
+        "hocl_capacity_ml": target_reservoir["hocl_capacity_ml"],
+        "hocl_low_threshold_ml": target_reservoir["hocl_low_threshold_ml"],
+        "hocl_low_level": target_is_low,
+    }
 
     return {
         "total_cycles": total_cycles,
@@ -1432,13 +1669,7 @@ def get_audit_stats(station_id: Optional[str] = None, user: dict = Depends(requi
             "defect_count": defect_count,
             "devices": fleet_summary
         },
-        "live_telemetry": live_station_telemetry.get(target_station, {
-            "station_id": target_station,
-            "ambient_temp_c": 25.0,
-            "relative_humidity_pct": 65.0,
-            "flow_rate_ml_min": 30.0,
-            "hocl_low_level": False,
-        })
+        "live_telemetry": target_live_telemetry
     }
 
 @app.get("/api/v1/ledger/verify")
