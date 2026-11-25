@@ -38,6 +38,7 @@ const char* password = "";
 // MQTT Broker (MQTTS over TLS 8883 with Root CA verification + payload auth_key)
 const char* mqtt_server_host = "broker.emqx.io";
 const int mqtt_port = 8883;
+const int mqtt_plain_port = 1883;
 const char* mqtt_username = "";
 const char* mqtt_password = "";
 const char* device_station_id = "MIST-BOH-01";
@@ -80,7 +81,15 @@ void publishTelemetry(float temp, float hum, float flow, float durationSec, floa
 void reconnectMQTT(bool force = false);
 
 WiFiClientSecure espClient;
+WiFiClient plainClient;
 PubSubClient client(espClient);
+bool usingWokwiPlainFallback = false;
+
+bool isWokwiGuestNetwork() {
+    IPAddress ip = WiFi.localIP();
+    bool isWokwiSubnet = (ip[0] == 10 && ip[1] == 13 && ip[2] == 37);
+    return (strcmp(ssid, "Wokwi-GUEST") == 0) || isWokwiSubnet;
+}
 
 volatile bool estop_active = false;
 unsigned long lastMqttRetry = 0;
@@ -244,11 +253,9 @@ void setupWiFi() {
         Serial.print(".");
     }
 
-    // Preserve DHCP primary DNS (needed in Wokwi-GUEST) while adding 8.8.8.8 as secondary fallback
+    // Preserve Wokwi DHCP configuration untouched when DHCP already provided DNS
     IPAddress dhcpDns = WiFi.dnsIP(0);
-    if (dhcpDns != INADDR_NONE && dhcpDns != IPAddress(0, 0, 0, 0)) {
-        WiFi.config(WiFi.localIP(), WiFi.gatewayIP(), WiFi.subnetMask(), dhcpDns, IPAddress(8, 8, 8, 8));
-    } else {
+    if (dhcpDns == INADDR_NONE || dhcpDns == IPAddress(0, 0, 0, 0)) {
         WiFi.config(WiFi.localIP(), WiFi.gatewayIP(), WiFi.subnetMask(), IPAddress(8, 8, 8, 8), IPAddress(1, 1, 1, 1));
     }
 
@@ -337,55 +344,105 @@ void pollAndPublishLiveSensors(bool forcePublish = false) {
     }
 }
 
-// Non-blocking MQTTS (TLS) connection with hostname verification
+// Non-blocking MQTTS (TLS 8883) with Wokwi NAT fallback to authenticated port 1883
 void reconnectMQTT(bool force) {
     if (client.connected()) return;
 
     unsigned long now = millis();
     if (force || now - lastMqttRetry > 3000) {
         lastMqttRetry = now;
-        Serial.print("[MQTTS] Attempting TLS connection to ");
-        Serial.print(mqtt_server_host);
-        Serial.print(":");
-        Serial.print(mqtt_port);
-        Serial.print("... ");
 
         IPAddress brokerIp;
         if (!WiFi.hostByName(mqtt_server_host, brokerIp)) {
-            Serial.println("DNS lookup failed (will retry in 3s)");
+            Serial.println("[MQTT] DNS lookup failed (will retry in 3s)");
             return;
         }
 
         // Hardware-seeded randomized client ID prevents broker session collisions
         String clientId = "MistSan-ESP32-" + String(micros(), HEX) + "-" + String(random(1000, 9999));
+        bool connected = false;
+        int activePort = mqtt_port;
 
-        client.setServer(mqtt_server_host, mqtt_port);
-        bool connected = (strlen(mqtt_username) > 0)
-            ? client.connect(clientId.c_str(), mqtt_username, mqtt_password)
-            : client.connect(clientId.c_str());
+        if (!usingWokwiPlainFallback) {
+            Serial.print("[MQTTS] Attempting TLS connection to ");
+            Serial.print(mqtt_server_host);
+            Serial.print(":");
+            Serial.print(mqtt_port);
+            Serial.print("... ");
+
+            espClient.setCACert(mqtt_ca_cert);
+            client.setClient(espClient);
+            client.setServer(mqtt_server_host, mqtt_port);
+            connected = (strlen(mqtt_username) > 0)
+                ? client.connect(clientId.c_str(), mqtt_username, mqtt_password)
+                : client.connect(clientId.c_str());
+
+            if (!connected) {
+                char tlsErr[128] = {0};
+                int tlsCode = espClient.lastError(tlsErr, sizeof(tlsErr));
+                espClient.stop();
+                Serial.print("failed, rc=");
+                Serial.print(client.state());
+                Serial.print(", ip=");
+                Serial.print(brokerIp);
+                Serial.print(", tls=");
+                Serial.print(tlsCode);
+                if (tlsErr[0] != '\0') {
+                    Serial.print(" (");
+                    Serial.print(tlsErr);
+                    Serial.print(")");
+                }
+                Serial.println();
+
+                if (isWokwiGuestNetwork()) {
+                    if (tlsCode != -80) {
+                        Serial.println("[WOKWI TLS] Retrying port 8883 with insecure TLS mode...");
+                        espClient.setInsecure();
+                        client.setClient(espClient);
+                        client.setServer(mqtt_server_host, mqtt_port);
+                        connected = (strlen(mqtt_username) > 0)
+                            ? client.connect(clientId.c_str(), mqtt_username, mqtt_password)
+                            : client.connect(clientId.c_str());
+                        if (!connected) {
+                            espClient.stop();
+                        }
+                    }
+                    if (!connected) {
+                        usingWokwiPlainFallback = true;
+                        Serial.println("[WOKWI NAT FALLBACK] Port 8883 reset on Wokwi-GUEST; connecting to broker.emqx.io:1883 (payload auth_key enforced)...");
+                    }
+                }
+            }
+        }
+
+        if (usingWokwiPlainFallback) {
+            activePort = mqtt_plain_port;
+            plainClient.stop();
+            plainClient.setTimeout(15000); // milliseconds (Arduino-ESP32 3.x NetworkClient)
+            client.setClient(plainClient);
+            client.setServer(mqtt_server_host, mqtt_plain_port);
+            connected = (strlen(mqtt_username) > 0)
+                ? client.connect(clientId.c_str(), mqtt_username, mqtt_password)
+                : client.connect(clientId.c_str());
+            if (!connected) {
+                plainClient.stop();
+                Serial.printf(
+                    "[WOKWI NAT FALLBACK] Connect to %s:%d failed, rc=%d (will retry in 3s)\n",
+                    mqtt_server_host,
+                    mqtt_plain_port,
+                    client.state()
+                );
+            }
+        }
 
         if (connected) {
-            Serial.println("connected (TLS)!");
+            Serial.println(activePort == mqtt_port ? "connected (TLS)!" : "connected (Wokwi 1883 fallback)!");
             client.subscribe(control_topic);
             Serial.print("[MQTT SUB] Subscribed to topic: ");
             Serial.println(control_topic);
             pollAndPublishLiveSensors(true);
-        } else {
-            char tlsErr[128] = {0};
-            int tlsCode = espClient.lastError(tlsErr, sizeof(tlsErr));
-            espClient.stop();
-            Serial.print("failed, rc=");
-            Serial.print(client.state());
-            Serial.print(", ip=");
-            Serial.print(brokerIp);
-            Serial.print(", tls=");
-            Serial.print(tlsCode);
-            if (tlsErr[0] != '\0') {
-                Serial.print(" (");
-                Serial.print(tlsErr);
-                Serial.print(")");
-            }
-            Serial.println(" (will retry in 3s)");
+        } else if (!usingWokwiPlainFallback) {
+            Serial.println("[MQTTS] Will retry TLS in 3s");
         }
     }
 }
