@@ -176,11 +176,18 @@ void setupWiFi() {
         Serial.print(".");
     }
 
-    // Configure public DNS servers to avoid ISP DNS interception while keeping DHCP lease
-    WiFi.config(WiFi.localIP(), WiFi.gatewayIP(), WiFi.subnetMask(), IPAddress(8, 8, 8, 8), IPAddress(1, 1, 1, 1));
+    // Preserve DHCP primary DNS (needed in Wokwi-GUEST) while adding 8.8.8.8 as secondary fallback
+    IPAddress dhcpDns = WiFi.dnsIP(0);
+    if (dhcpDns != INADDR_NONE && dhcpDns != IPAddress(0, 0, 0, 0)) {
+        WiFi.config(WiFi.localIP(), WiFi.gatewayIP(), WiFi.subnetMask(), dhcpDns, IPAddress(8, 8, 8, 8));
+    } else {
+        WiFi.config(WiFi.localIP(), WiFi.gatewayIP(), WiFi.subnetMask(), IPAddress(8, 8, 8, 8), IPAddress(1, 1, 1, 1));
+    }
 
-    Serial.println("\n[WIFI] Connected! IP Address: ");
-    Serial.println(WiFi.localIP());
+    Serial.print("\n[WIFI] Connected! IP Address: ");
+    Serial.print(WiFi.localIP());
+    Serial.print(" | DNS: ");
+    Serial.println(WiFi.dnsIP(0));
 
     // Sync SNTP clock briefly so mbedTLS certificate validity checks succeed
     configTime(0, 0, "pool.ntp.org", "time.nist.gov");
@@ -249,13 +256,19 @@ void reconnectMQTT(bool force) {
     if (client.connected()) return;
 
     unsigned long now = millis();
-    if (force || now - lastMqttRetry > 2000) {
+    if (force || now - lastMqttRetry > 3000) {
         lastMqttRetry = now;
         Serial.print("[MQTTS] Attempting TLS connection to ");
         Serial.print(mqtt_server_host);
         Serial.print(":");
         Serial.print(mqtt_port);
         Serial.print("... ");
+
+        IPAddress brokerIp;
+        if (!WiFi.hostByName(mqtt_server_host, brokerIp)) {
+            Serial.println("DNS lookup failed (will retry in 3s)");
+            return;
+        }
 
         // Hardware-seeded randomized client ID prevents broker session collisions
         String clientId = "MistSan-ESP32-" + String(micros(), HEX) + "-" + String(random(1000, 9999));
@@ -272,9 +285,21 @@ void reconnectMQTT(bool force) {
             Serial.println(control_topic);
             pollAndPublishLiveSensors(true);
         } else {
+            char tlsErr[128] = {0};
+            int tlsCode = espClient.lastError(tlsErr, sizeof(tlsErr));
+            espClient.stop();
             Serial.print("failed, rc=");
             Serial.print(client.state());
-            Serial.println(" (will retry in 2s)");
+            Serial.print(", ip=");
+            Serial.print(brokerIp);
+            Serial.print(", tls=");
+            Serial.print(tlsCode);
+            if (tlsErr[0] != '\0') {
+                Serial.print(" (");
+                Serial.print(tlsErr);
+                Serial.print(")");
+            }
+            Serial.println(" (will retry in 3s)");
         }
     }
 }
@@ -440,12 +465,12 @@ void setup() {
 
     setupWiFi();
     espClient.setCACert(mqtt_ca_cert);
-    espClient.setTimeout(15000);          // milliseconds (Arduino-ESP32 3.x NetworkClientSecure)
-    espClient.setHandshakeTimeout(30);    // seconds (generous for Wokwi simulated TLS handshake)
+    espClient.setTimeout(30000);          // milliseconds (Arduino-ESP32 3.x NetworkClientSecure)
+    espClient.setHandshakeTimeout(60);    // seconds (generous for Wokwi simulated TLS handshake)
     client.setServer(mqtt_server_host, mqtt_port);
     client.setCallback(onMqttMessage);
     client.setBufferSize(512);
-    client.setSocketTimeout(15);
+    client.setSocketTimeout(30);
 
     Serial.println("--- MistSan ESP32 Firmware Ready (MQTTS TLS) ---");
 }
