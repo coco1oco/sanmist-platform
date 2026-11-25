@@ -356,8 +356,6 @@
     .dot-btn:hover { background: rgba(255,255,255,.6); }
     .dot-btn.is-active { width: 28px; background: #fff; }
     .login-hero .art-wide { display: none; }
-    .hero-banner { position: relative; }
-    .banner-chips { position: absolute; top: 18px; right: 18px; z-index: 4; display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
     .glass { color: #fff; background: rgba(0,0,0,.5); border: 1px solid rgba(255,255,255,.2); backdrop-filter: blur(10px); }
 
     /* Login Overlay */
@@ -551,7 +549,6 @@
     @media (max-width: 720px) {
       .slideshow.compact { height: 200px; }
       .slideshow.compact .slide-text { display: none; }
-      .banner-chips { top: 12px; right: 12px; }
       .topbar { padding: 14px 20px; }
       main.content { padding: 24px 20px 120px; }
       .panel, .form-card { padding: 24px; }
@@ -1025,12 +1022,6 @@
       </div>
       <!-- ============ VIEW 1: OVERVIEW ============ -->
       <div id="view-overview" class="stack">
-        <div class="hero-banner">
-          <div id="dash-slideshow"></div>
-          <div class="banner-chips">
-            <span class="chip glass"><span id="banner-dot" class="dot" style="--tone:#fbbf24"></span><span id="banner-station-name">No station linked</span></span>
-          </div>
-        </div>
 
         <div id="empty-note" class="tone-card tone-info empty-note hidden">
           <div class="empty-ico">
@@ -1272,9 +1263,6 @@
 
       <!-- ============ VIEW 4: SETTINGS ============ -->
       <div id="view-settings" class="hidden stack">
-        <div class="hero-banner">
-          <div id="reg-slideshow"></div>
-        </div>
         <div id="reg-welcome" class="tone-card tone-info empty-note hidden">
           <div class="empty-ico">
             <svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -1485,14 +1473,6 @@
       { kind: "mist", photo: "img/login.jpg", eyebrow: "Dry-fog sanitation", title: "Sanitize on schedule, without lifting a finger.", text: "Plan autonomous misting cycles for every station and let SanMist handle the warnings, dosing and logging." },
       { kind: "verify", eyebrow: "Compliance ledger", title: "Every cycle, verified and tamper-evident.", text: "Each run is written to a SHA-256 hash chain, so your audit trail is always ready to show." },
       { kind: "telemetry", eyebrow: "Live telemetry", title: "Know your station's conditions in real time.", text: "Temperature, humidity, flow rate and HOCl level stream in continuously, color-coded at a glance." }
-    ];
-    const DASH_SLIDES = [
-      { kind: "mist", photo: "img/dashboard.jpg", eyebrow: "Fleet overview", title: "Your stations, at a glance.", text: "Live readings, cycle outcomes and compliance status in one place." },
-      { kind: "telemetry", eyebrow: "Scheduling", title: "Automate your daily sanitation.", text: "Set the days, time and duration once. Pre-warning buzzers and the HOCl interlock run on every cycle." },
-      { kind: "verify", eyebrow: "Audit ledger", title: "Compliance you can prove.", text: "Export a PDF certificate or CSV straight from the tamper-evident ledger." }
-    ];
-    const REG_SLIDES = [
-      { kind: "telemetry", photo: "img/dashboard.jpg", eyebrow: "Fleet provisioning", title: "Manage your station fleet.", text: "Enter the serial number and secret key from your ESP32 unit to pair a station, or unpair existing units below." }
     ];
 
     let _artUid = 0;
@@ -1806,27 +1786,12 @@
     let hasDevices = null;
     let emptyRedirectDone = false;
 
-    function updateBannerStation() {
-      const sel = $("global-station-selector");
-      const name = $("banner-station-name");
-      const dot = $("banner-dot");
-      if (!name) return;
-      if (hasDevices) {
-        name.textContent = sel?.selectedOptions[0]?.textContent || activeStation;
-        dot?.style.setProperty("--tone", "#34d399");
-      } else {
-        name.textContent = "No station linked";
-        dot?.style.setProperty("--tone", "#fbbf24");
-      }
-    }
-
     function setNoDeviceState(isEmpty) {
       hasDevices = !isEmpty;
       $("empty-note")?.classList.toggle("hidden", !isEmpty);
       $("reg-welcome")?.classList.toggle("hidden", !isEmpty);
       $("view-overview")?.classList.toggle("is-empty", isEmpty);
       $("btn-fab-start-cycle")?.classList.toggle("fab-hidden", isEmpty);
-      updateBannerStation();
     }
 
     async function loadFleetDevices() {
@@ -1905,7 +1870,6 @@
     function onStationChanged(serial) {
       activeStation = serial;
       currentPage = 1;
-      updateBannerStation();
       refreshDashboard();
       if (!$("view-schedules")?.classList.contains("hidden")) {
         loadActiveStationSchedule();
@@ -3036,8 +3000,6 @@
 
     // Mount visual slideshows and initial views
     mountSlideshow($("login-slideshow"), LOGIN_SLIDES, { mode: "tall" });
-    mountSlideshow($("dash-slideshow"), DASH_SLIDES, { mode: "wide" });
-    mountSlideshow($("reg-slideshow"), REG_SLIDES, { mode: "wide" });
     initGoogleAuth();
     initTheme();
     renderScheduleContainer(null);
