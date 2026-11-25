@@ -35,7 +35,7 @@ def normalize_hhmm(time_str: Optional[str]) -> Optional[str]:
 
 def run_schedule_tick(
     conn_factory: Callable[[], sqlite3.Connection],
-    dispatch_fn: Callable[..., bool],
+    dispatch_fn: Callable[..., bool | str],
     now_utc: Optional[datetime] = None,
 ) -> list[dict]:
     """Evaluate active PHT schedules once for the current minute slot and dispatch due stations."""
@@ -74,14 +74,14 @@ def run_schedule_tick(
             duration_sec = int(row["duration_sec"] or 30)
             room_volume_m3 = float(row["room_volume_m3"] or 1.0)
 
-            ok = dispatch_fn(
+            result = dispatch_fn(
                 station_id=serial,
                 duration_sec=duration_sec,
                 room_volume_m3=room_volume_m3,
                 trigger_type="SCHEDULED",
                 triggered_by="scheduler",
             )
-            if ok:
+            if result:
                 triggered_iso = current_utc.isoformat()
                 cursor.execute(
                     """
@@ -100,6 +100,7 @@ def run_schedule_tick(
                         "room_volume_m3": room_volume_m3,
                         "slot_pht": current_slot,
                         "triggered_at": triggered_iso,
+                        "status": result if isinstance(result, str) else "DISPATCHED",
                     }
                 )
     finally:

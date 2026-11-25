@@ -877,8 +877,19 @@ class SanMistRouteAuthTests(unittest.TestCase):
             )
             self.assertEqual(trig_code, 409)
             self.assertIn("depleted", trig_err["detail"].lower())
-            self.assertFalse(main._dispatch_scheduled_cycle("MIST-BOH-01", 30, 1.0))
+            self.assertEqual(main._dispatch_scheduled_cycle("MIST-BOH-01", 30, 1.0), "BLOCKED_HOCL")
             self.assertEqual(len(published), 0)
+
+            rec_code, _, rec_rows = call_api(
+                "GET", "/api/v1/records", headers=admin_headers, query_string="limit=5"
+            )
+            self.assertEqual(rec_code, 200)
+            self.assertEqual(rec_rows[0]["trigger_type"], "SCHEDULED_BLOCKED_HOCL")
+            self.assertEqual(rec_rows[0]["compliance_status"], "HOCL INTERLOCK BLOCKED")
+            self.assertEqual(rec_rows[0]["efficacy_label"], "Fail")
+            ver_code, _, ver_data = call_api("GET", "/api/v1/ledger/verify", headers=admin_headers)
+            self.assertEqual(ver_code, 200)
+            self.assertTrue(ver_data["verified"])
 
             main._on_mqtt_message(
                 None,
@@ -1051,6 +1062,136 @@ class SanMistRouteAuthTests(unittest.TestCase):
             )
             self.assertEqual(ok_code, 200)
             self.assertEqual(ok_data["status"], "DISPATCHED")
+        finally:
+            main.mqtt_client.is_connected = orig_is_connected
+            main.mqtt_client.publish = orig_publish
+            if orig_telemetry:
+                main.live_station_telemetry["MIST-BOH-01"] = orig_telemetry
+            else:
+                main.live_station_telemetry.setdefault("MIST-BOH-01", {})["hocl_low_level"] = False
+
+    def test_hocl_sufficiency_blocks_insufficient_duration_and_logs_blocked_schedule_once(self) -> None:
+        from datetime import datetime, timezone
+        from backend.app.scheduler import run_schedule_tick
+
+        admin_headers = {"Authorization": f"Bearer {self._login_admin()}"}
+        orig_is_connected = main.mqtt_client.is_connected
+        orig_publish = main.mqtt_client.publish
+        orig_telemetry = dict(main.live_station_telemetry.get("MIST-BOH-01", {}))
+        published: list[tuple[str, str]] = []
+
+        class _FakeMsg:
+            def __init__(self, topic: str, payload: dict) -> None:
+                self.topic = topic
+                self.payload = json.dumps(payload).encode("utf-8")
+
+        class _FakePubInfo:
+            rc = main.mqtt.MQTT_ERR_SUCCESS
+
+        try:
+            main.mqtt_client.is_connected = lambda: True
+
+            def fake_publish(topic, payload):
+                published.append((topic, payload))
+                return _FakePubInfo()
+
+            main.mqtt_client.publish = fake_publish
+            device_key = main._get_device_auth_key("MIST-BOH-01")
+
+            # Set 60.0 mL remaining (10.0 mL usable above 50.0 mL reserve) at 30.0 mL/min
+            main._on_mqtt_message(
+                None,
+                None,
+                _FakeMsg(
+                    "sanmist/devices/MIST-BOH-01/status",
+                    {
+                        "station_id": "MIST-BOH-01",
+                        "ambient_temp_c": 26.5,
+                        "relative_humidity_pct": 60.0,
+                        "flow_rate_ml_min": 30.0,
+                        "hocl_remaining_ml": 60.0,
+                        "hocl_capacity_ml": 500.0,
+                        "hocl_low_level": False,
+                        "cycle_in_progress": False,
+                        "auth_key": device_key,
+                    },
+                ),
+            )
+
+            # 30s cycle needs 15.0 mL > 10.0 mL usable -> 409 Conflict
+            long_code, _, long_err = call_api(
+                "POST",
+                "/api/v1/trigger",
+                headers=admin_headers,
+                body={"station_id": "MIST-BOH-01", "duration_sec": 30, "room_volume_m3": 1.0},
+            )
+            self.assertEqual(long_code, 409)
+            self.assertIn("insufficient hocl", long_err["detail"].lower())
+            self.assertEqual(len(published), 0)
+
+            # 10s cycle needs 5.0 mL <= 10.0 mL usable -> 200 Dispatched
+            short_code, _, short_data = call_api(
+                "POST",
+                "/api/v1/trigger",
+                headers=admin_headers,
+                body={"station_id": "MIST-BOH-01", "duration_sec": 10, "room_volume_m3": 1.0},
+            )
+            self.assertEqual(short_code, 200)
+            self.assertEqual(short_data["status"], "DISPATCHED")
+            self.assertEqual(len(published), 1)
+            published.clear()
+
+            # Save a scheduled 30s routine (needs 15.0 mL > 10.0 mL usable)
+            save_code, _, _ = call_api(
+                "POST",
+                "/api/v1/schedules",
+                headers=admin_headers,
+                body={
+                    "serial_number": "MIST-BOH-01",
+                    "days_of_week": "MON, TUE, WED, THU, FRI, SAT, SUN",
+                    "start_time_pht": "23:00:00",
+                    "duration_sec": 30,
+                    "room_volume_m3": 1.0,
+                    "dosage_ml": 15.0,
+                },
+            )
+            self.assertEqual(save_code, 200)
+
+            slot_utc = datetime(2026, 11, 25, 15, 0, 5, tzinfo=timezone.utc)
+            slot_later_utc = datetime(2026, 11, 25, 15, 0, 35, tzinfo=timezone.utc)
+
+            # First tick blocks MQTT, logs 1 SCHEDULED_BLOCKED_HOCL record with 0 mL consumed
+            res1 = run_schedule_tick(main.get_db_connection, main._dispatch_scheduled_cycle, now_utc=slot_utc)
+            self.assertEqual(len(res1), 1)
+            self.assertEqual(res1[0]["status"], "BLOCKED_HOCL")
+            self.assertEqual(len(published), 0)
+
+            # Second tick in same minute does NOT duplicate ledger row
+            res2 = run_schedule_tick(main.get_db_connection, main._dispatch_scheduled_cycle, now_utc=slot_later_utc)
+            self.assertEqual(res2, [])
+            self.assertEqual(len(published), 0)
+
+            rec_code, _, rows = call_api(
+                "GET", "/api/v1/records", headers=admin_headers, query_string="limit=10"
+            )
+            self.assertEqual(rec_code, 200)
+            blocked_rows = [r for r in rows if r["trigger_type"] == "SCHEDULED_BLOCKED_HOCL"]
+            self.assertEqual(len(blocked_rows), 1)
+            self.assertEqual(blocked_rows[0]["compliance_status"], "HOCL INTERLOCK BLOCKED")
+            self.assertEqual(blocked_rows[0]["efficacy_label"], "Fail")
+            self.assertEqual(blocked_rows[0]["flow_rate_ml_min"], 0.0)
+            self.assertEqual(blocked_rows[0]["cycle_duration_sec"], 0.0)
+
+            # Remaining mL stays at 60.0 (not subtracted) and ledger chain remains verified
+            stats_code, _, stats = call_api(
+                "GET", "/api/v1/stats", headers=admin_headers, query_string="station_id=MIST-BOH-01"
+            )
+            self.assertEqual(stats_code, 200)
+            self.assertEqual(stats["live_telemetry"]["hocl_remaining_ml"], 60.0)
+
+            ver_code, _, ver = call_api("GET", "/api/v1/ledger/verify", headers=admin_headers)
+            self.assertEqual(ver_code, 200)
+            self.assertTrue(ver["verified"])
         finally:
             main.mqtt_client.is_connected = orig_is_connected
             main.mqtt_client.publish = orig_publish

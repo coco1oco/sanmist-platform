@@ -640,7 +640,11 @@ def compute_evaporation_adjusted_sei(cycle: CycleTelemetryInput) -> float:
     duration_min = cycle.cycle_duration_sec / 60.0
     return round((effective_flow * duration_min) / cycle.room_volume_m3, 3)
 
-def evaluate_telemetry_cycle(cycle: CycleTelemetryInput, deduplicate_window_sec: float = 0.0) -> dict:
+def evaluate_telemetry_cycle(
+    cycle: CycleTelemetryInput,
+    deduplicate_window_sec: float = 0.0,
+    compliance_status_override: Optional[str] = None,
+) -> dict:
     now_dt = datetime.now(timezone.utc)
     recorded_at = now_dt.isoformat()
     ml_confidence = None
@@ -651,6 +655,11 @@ def evaluate_telemetry_cycle(cycle: CycleTelemetryInput, deduplicate_window_sec:
         predicted_class = 0
         efficacy_label = "Fail"
         compliance_status = "SAFETY INTERLOCK TRIPPED"
+    elif compliance_status_override:
+        sei_score = 0.0
+        predicted_class = 0
+        efficacy_label = "Fail"
+        compliance_status = compliance_status_override
     else:
         sei_score = compute_evaporation_adjusted_sei(cycle)
         is_compliant = sei_score >= 2.800
@@ -798,7 +807,7 @@ def evaluate_telemetry_cycle(cycle: CycleTelemetryInput, deduplicate_window_sec:
 
     consumed_ml = (
         0.0
-        if cycle.estop_triggered
+        if (cycle.estop_triggered or compliance_status_override is not None)
         else round((cycle.flow_rate_ml_min * (cycle.cycle_duration_sec / 60.0)), 2)
     )
     reservoir = _update_station_reservoir(
@@ -1086,16 +1095,64 @@ def _is_station_hocl_low(station_id: str) -> bool:
     return reservoir["hocl_remaining_ml"] <= reservoir["hocl_low_threshold_ml"]
 
 
+def _check_station_hocl_sufficient(station_id: str, duration_sec: int) -> tuple[bool, dict]:
+    reservoir = _get_station_reservoir(station_id)
+    tel = live_station_telemetry.get(station_id, {})
+    flow_ml_min = float(tel.get("flow_rate_ml_min") or 30.0)
+    if flow_ml_min <= 0.0:
+        flow_ml_min = 30.0
+    required_ml = round(flow_ml_min * (max(0.0, float(duration_sec)) / 60.0), 2)
+    remaining_ml = reservoir["hocl_remaining_ml"]
+    threshold_ml = reservoir["hocl_low_threshold_ml"]
+    usable_ml = round(max(0.0, remaining_ml - threshold_ml), 2)
+    is_low = (
+        bool(tel.get("hocl_float_low", False))
+        or bool(tel.get("hocl_low_level", False))
+        or (remaining_ml <= threshold_ml)
+    )
+    sufficient = (not is_low) and (usable_ml >= required_ml)
+    return sufficient, {
+        "remaining_ml": remaining_ml,
+        "capacity_ml": reservoir["hocl_capacity_ml"],
+        "threshold_ml": threshold_ml,
+        "usable_ml": usable_ml,
+        "required_ml": required_ml,
+        "flow_ml_min": flow_ml_min,
+        "is_low": is_low,
+    }
+
+
 def _dispatch_scheduled_cycle(
     station_id: str,
     duration_sec: int,
     room_volume_m3: float,
     trigger_type: str = "SCHEDULED",
     triggered_by: str = "scheduler",
-) -> bool:
-    if _is_station_hocl_low(station_id):
-        print(f"[SCHEDULER] Blocked scheduled cycle for {station_id}: HOCl disinfectant reservoir depleted.")
-        return False
+) -> bool | str:
+    sufficient, info = _check_station_hocl_sufficient(station_id, duration_sec)
+    if not sufficient:
+        tel = live_station_telemetry.get(station_id, {})
+        blocked_cycle = CycleTelemetryInput(
+            station_id=station_id,
+            ambient_temp_c=float(tel.get("ambient_temp_c", 25.0)),
+            relative_humidity_pct=float(tel.get("relative_humidity_pct", 65.0)),
+            flow_rate_ml_min=0.0,
+            cycle_duration_sec=0.0,
+            room_volume_m3=room_volume_m3,
+            delivery_confirmed=False,
+            estop_triggered=False,
+            trigger_type="SCHEDULED_BLOCKED_HOCL",
+        )
+        evaluate_telemetry_cycle(
+            blocked_cycle,
+            compliance_status_override="HOCL INTERLOCK BLOCKED",
+        )
+        print(
+            f"[SCHEDULER] Blocked scheduled cycle for {station_id} and logged to ledger: "
+            f"needs {info['required_ml']:.1f} mL, {info['usable_ml']:.1f} mL usable "
+            f"({info['remaining_ml']:.1f} mL remaining)."
+        )
+        return "BLOCKED_HOCL"
     ok, err = _publish_start_command(
         station_id=station_id,
         duration_sec=duration_sec,
@@ -1689,10 +1746,22 @@ def trigger_cycle(req: CycleTriggerRequest, user: dict = Depends(require_auth)) 
     trigger_type = req.trigger_type or "MANUAL_WEB"
     station_id = req.station_id or "MIST-BOH-01"
     _ensure_station_access(user, station_id)
-    if _is_station_hocl_low(station_id):
+    sufficient, info = _check_station_hocl_sufficient(station_id, req.duration_sec)
+    if not sufficient:
+        if info["is_low"]:
+            detail = (
+                f"HOCl disinfectant reservoir depleted ({info['remaining_ml']:.1f} mL remaining); "
+                "refill before starting a cycle."
+            )
+        else:
+            detail = (
+                f"Insufficient HOCl for {req.duration_sec}s cycle: needs {info['required_ml']:.1f} mL, "
+                f"only {info['usable_ml']:.1f} mL usable above {info['threshold_ml']:.0f} mL reserve "
+                f"({info['remaining_ml']:.1f} mL remaining)."
+            )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="HOCl disinfectant reservoir depleted; refill before starting a cycle.",
+            detail=detail,
         )
 
     ok, err = _publish_start_command(

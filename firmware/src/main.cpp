@@ -102,6 +102,18 @@ bool isHoclLow() {
     return isPhysicalFloatLow() || (hoclRemainingMl <= HOCL_LOW_THRESHOLD_ML);
 }
 
+float estimateRequiredMl(unsigned long durationMs) {
+    int potValue = analogRead(PIN_POT);
+    float currentFlow = (float)map(potValue, 0, 4095, 10, 50); // mL/min proxy
+    return currentFlow * (durationMs / 60000.0f);
+}
+
+bool hasEnoughHoclFor(unsigned long durationMs) {
+    if (isHoclLow()) return false;
+    float usableMl = hoclRemainingMl - HOCL_LOW_THRESHOLD_ML;
+    return usableMl >= estimateRequiredMl(durationMs);
+}
+
 void IRAM_ATTR handleEmergencyStop() {
     estop_active = true;
     digitalWrite(PIN_ATOMIZER, LOW);
@@ -162,11 +174,6 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
 
     // 2. Handle Remote Trigger START (defer execution to loop() to avoid re-entrant MQTT callback)
     if (strcmp(command, "START") == 0) {
-        if (isHoclLow()) {
-            Serial.println("[INTERLOCK] Remote START rejected: HOCl disinfectant reservoir depleted!");
-            statusSyncRequested = true;
-            return;
-        }
         if (cycleInProgress || remoteTriggerRequested) {
             Serial.println("[WARN] Trigger ignored: Cycle already in progress.");
             return;
@@ -174,9 +181,23 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
         int durationSec = doc["duration_sec"] | 30;
         if (durationSec < 5) durationSec = 5;
         if (durationSec > 300) durationSec = 300;
+        unsigned long requestedMs = (unsigned long)durationSec * 1000UL;
+        if (!hasEnoughHoclFor(requestedMs)) {
+            float neededMl = estimateRequiredMl(requestedMs);
+            float usableMl = max(0.0f, hoclRemainingMl - HOCL_LOW_THRESHOLD_ML);
+            Serial.printf(
+                "[INTERLOCK] Remote START rejected: needs %.1f mL, only %.1f mL usable (%.1f/%.0f mL remaining)\n",
+                neededMl,
+                usableMl,
+                hoclRemainingMl,
+                HOCL_CAPACITY_ML
+            );
+            statusSyncRequested = true;
+            return;
+        }
         float roomVol = doc["room_volume_m3"] | 1.0f;
         if (roomVol <= 0.0f) roomVol = DEFAULT_ROOM_VOLUME_M3;
-        remoteMistDurationMs = (unsigned long)durationSec * 1000UL;
+        remoteMistDurationMs = requestedMs;
         remoteRoomVolumeM3 = roomVol;
         remoteTriggerRequested = true;
         Serial.print("[REMOTE TRIGGER] Queued! Duration: ");
@@ -366,8 +387,16 @@ void publishTelemetry(float temp, float hum, float flow, float durationSec, floa
 }
 
 void runSanitizationCycle(unsigned long durationMs, float roomVol) {
-    if (isHoclLow()) {
-        Serial.println("[INTERLOCK] Cycle blocked: HOCl disinfectant reservoir depleted!");
+    if (!hasEnoughHoclFor(durationMs)) {
+        float neededMl = estimateRequiredMl(durationMs);
+        float usableMl = max(0.0f, hoclRemainingMl - HOCL_LOW_THRESHOLD_ML);
+        Serial.printf(
+            "[INTERLOCK] Cycle blocked: needs %.1f mL, only %.1f mL usable (%.1f/%.0f mL remaining)\n",
+            neededMl,
+            usableMl,
+            hoclRemainingMl,
+            HOCL_CAPACITY_ML
+        );
         tone(PIN_BUZZER, BUZZER_FREQ_HZ);
         delay(250);
         noTone(PIN_BUZZER);
